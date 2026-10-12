@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from 'next';
 import { ReferralProvider } from '@profullstack/referrals/react';
-import { FeedbackWidget } from '@profullstack/stack/feedback';
 import Script from 'next/script';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
@@ -9,6 +8,11 @@ import { guideAvailable } from '@/lib/field-guide/asset';
 import { Providers } from '@/components/Providers';
 import './globals.css';
 import { serializeJsonLd } from '@/lib/seo/json-ld';
+
+// Re-render static pages hourly so the shared footer (@profullstack/footer,
+// rendered from its @latest template) picks up releases without a redeploy.
+// force-dynamic routes keep their own setting.
+export const revalidate = 3600;
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://coinpayportal.com'),
@@ -140,7 +144,6 @@ export default async function RootLayout({
           src="https://crawlproof.com/stats.js"
           strategy="afterInteractive"
         />
-        <FeedbackWidget property="coinpayportal.com" />
       </body>
     </html>
   );

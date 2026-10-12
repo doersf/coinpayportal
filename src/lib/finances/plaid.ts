@@ -406,6 +406,45 @@ export function getProducts(): string[] {
   return products;
 }
 
+/**
+ * Countries Link offers institutions from: PLAID_COUNTRY_CODES, default US.
+ *
+ * Data Transparency Messaging use cases are only applied when these equal the
+ * country list of the Link customization in use (the dashboard's "default"
+ * one unless PLAID_LINK_CUSTOMIZATION names another); otherwise Plaid links
+ * without them and says "use cases were not applied". Point
+ * PLAID_LINK_CUSTOMIZATION at a US-only customization rather than widening
+ * this list: liabilities is a US/Canada product.
+ */
+export function getCountryCodes(): string[] {
+  const codes = (process.env.PLAID_COUNTRY_CODES || '')
+    .split(',')
+    .map((c) => c.trim().toUpperCase())
+    .filter((c) => /^[A-Z]{2}$/.test(c));
+  return codes.length ? [...new Set(codes)] : ['US'];
+}
+
+/**
+ * Days of history Plaid pulls when a bank is first linked: PLAID_TRANSACTIONS_DAYS,
+ * default 730 (Plaid's maximum). Without it Plaid pulls 90 days, and the
+ * window cannot be widened after the item is linked.
+ */
+export function getTransactionsDays(): number {
+  const days = Number.parseInt(process.env.PLAID_TRANSACTIONS_DAYS || '', 10);
+  return Number.isInteger(days) && days >= 1 && days <= 730 ? days : 730;
+}
+
+/**
+ * Where an OAuth bank (Chase, Bank of America, Wells Fargo…) sends the
+ * browser back to: PLAID_REDIRECT_URI, which must also be listed under
+ * Allowed redirect URIs in the Plaid dashboard or link/token/create fails.
+ * Unset, OAuth institutions cannot finish linking in production.
+ */
+export function getRedirectUri(): string | null {
+  const uri = process.env.PLAID_REDIRECT_URI?.trim();
+  return uri && /^https:\/\//.test(uri) ? uri : null;
+}
+
 /** Create a short-lived token for Plaid Link, the client-side connect UI. */
 export async function createLinkToken(params: {
   /** Stable, non-PII id for the end user. The merchant id. */
@@ -430,8 +469,13 @@ export async function createLinkToken(params: {
       // bills liabilities separately, per account per month, so a deployment
       // that only wants cashflow can drop it via PLAID_PRODUCTS.
       products: getProducts(),
-      country_codes: ['US'],
+      ...(getProducts().includes('transactions') ? { transactions: { days_requested: getTransactionsDays() } } : {}),
+      ...(getRedirectUri() ? { redirect_uri: getRedirectUri() } : {}),
+      country_codes: getCountryCodes(),
       language: 'en',
+      ...(process.env.PLAID_LINK_CUSTOMIZATION?.trim()
+        ? { link_customization_name: process.env.PLAID_LINK_CUSTOMIZATION.trim() }
+        : {}),
       ...(params.webhookUrl ? { webhook: params.webhookUrl } : {}),
     },
   );
@@ -467,7 +511,7 @@ export async function exchangePublicToken(publicToken: string): Promise<PlaidExc
     if (institutionId) {
       const institution = await plaidPost<{ institution: { name?: string } }>(
         '/institutions/get_by_id',
-        { institution_id: institutionId, country_codes: ['US'] },
+        { institution_id: institutionId, country_codes: getCountryCodes() },
       );
       institutionName = institution.institution?.name ?? null;
     }
