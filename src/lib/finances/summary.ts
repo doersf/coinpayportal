@@ -61,6 +61,10 @@ export interface FinanceAccount {
   scope_override: string | null;
   is_hidden: boolean;
   last_seen_at: string;
+  /** Statement due day, 1-31, stated by the owner; no feed carries it. */
+  payment_due_day?: number | null;
+  /** Fixed amount due on that day, or null for the statement balance. */
+  payment_due_amount?: number | null;
 }
 
 export interface FinanceTransaction {
@@ -218,7 +222,7 @@ export async function listAccounts(
   let query = supabase
     .from('finance_accounts')
     .select(
-      'id, connection_id, external_id, org_name, org_domain, name, currency, balance, available_balance, balance_date, kind, kind_override, scope_override, is_hidden, last_seen_at',
+      'id, connection_id, external_id, org_name, org_domain, name, currency, balance, available_balance, balance_date, kind, kind_override, scope_override, is_hidden, last_seen_at, payment_due_day, payment_due_amount',
     )
     .in('connection_id', connectionIds)
     .order('org_name', { ascending: true })

@@ -8,12 +8,12 @@ import { toAccountView, merchantOwnsAccount, type FinanceAccount } from '@/lib/f
 export const dynamic = 'force-dynamic';
 
 const ACCOUNT_COLUMNS =
-  'id, connection_id, external_id, org_name, org_domain, name, currency, balance, available_balance, balance_date, kind, kind_override, scope_override, is_hidden, last_seen_at';
+  'id, connection_id, external_id, org_name, org_domain, name, currency, balance, available_balance, balance_date, kind, kind_override, scope_override, is_hidden, last_seen_at, payment_due_day, payment_due_amount';
 
 /**
  * PATCH /api/finances/accounts/[id] — operator corrections.
  *
- * Only three fields are writable, and none is imported data. `kind_override`
+ * Only these fields are writable, and none is imported data. `kind_override`
  * corrects a misclassified account (SimpleFIN has no account-type field, so the
  * kind is a guess from the name) and is stored separately from the derived
  * `kind` so the next sync re-deriving that guess cannot clobber the correction.
@@ -21,6 +21,8 @@ const ACCOUNT_COLUMNS =
  * to, which the name cannot always tell (a personal card carrying company
  * spend looks personal and is not). `is_hidden` drops a closed or duplicate
  * account out of the totals while leaving its history intact.
+ * `payment_due_day` / `payment_due_amount` state a card or loan's statement
+ * due day, which no feed carries, for the due-soon list and daily summary.
  *
  * Balances and transactions are deliberately not writable: they are a record of
  * what an institution said, and an editable ledger is not a ledger.
@@ -31,7 +33,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { id } = await params;
 
-  let body: { kind_override?: unknown; scope_override?: unknown; is_hidden?: unknown };
+  let body: { kind_override?: unknown; scope_override?: unknown; is_hidden?: unknown; payment_due_day?: unknown; payment_due_amount?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -68,6 +70,35 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: 'is_hidden must be a boolean' }, { status: 400 });
     }
     update.is_hidden = body.is_hidden;
+  }
+
+  if ('payment_due_day' in body) {
+    // The statement due day no feed carries; it puts the account on the
+    // due-soon list. null takes it off.
+    if (body.payment_due_day === null || body.payment_due_day === '') {
+      update.payment_due_day = null;
+    } else {
+      const day = Number(body.payment_due_day);
+      if (!Number.isInteger(day) || day < 1 || day > 31) {
+        return NextResponse.json({ error: 'payment_due_day must be 1 to 31' }, { status: 400 });
+      }
+      update.payment_due_day = day;
+    }
+  }
+
+  if ('payment_due_amount' in body) {
+    // A fixed instalment or minimum; null means "the statement balance".
+    if (body.payment_due_amount === null || body.payment_due_amount === '') {
+      update.payment_due_amount = null;
+    } else {
+      // Checked as text: 810.46 * 10000 is not an integer in floating point.
+      const text = String(body.payment_due_amount).trim();
+      const amount = Number(text);
+      if (!/^\d{1,12}(\.\d{1,4})?$/.test(text) || !Number.isFinite(amount)) {
+        return NextResponse.json({ error: 'payment_due_amount must be a positive amount with at most 4 decimals' }, { status: 400 });
+      }
+      update.payment_due_amount = amount;
+    }
   }
 
   if (Object.keys(update).length === 0) {

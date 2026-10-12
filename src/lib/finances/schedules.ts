@@ -7,19 +7,36 @@ import type { EmailAttachment } from '../email';
 import { audit } from './audit';
 
 /**
- * Scheduled emails: a weekly digest on chosen weekdays.
+ * Scheduled emails, one row per merchant per kind:
  *
- * One row per merchant. The worker turns a due row into an `email_report`
- * job, which sends the previous seven days of the books (totals by tax
- * category, unreviewed count, the CPA pack attached) to the recipients.
- * Days and the hour are in the merchant's finance timezone; the next run
- * is computed from those, never from the server clock's day.
+ * - `weekly_digest` sends the previous seven days of the books (totals by
+ *   tax category, unreviewed count, the CPA pack attached).
+ * - `daily_summary` sends what is due and overdue across every account,
+ *   the recurring charges, what was imported since the last one, and the
+ *   balance sheet (`daily-summary.ts`). No attachments.
+ *
+ * The worker turns a due row into an `email_report` job. Days and the hour
+ * are in the merchant's finance timezone; the next run is computed from
+ * those, never from the server clock's day.
  */
+
+export type ScheduleKind = 'weekly_digest' | 'daily_summary';
+export const SCHEDULE_KINDS: ScheduleKind[] = ['weekly_digest', 'daily_summary'];
+
+export function isScheduleKind(value: unknown): value is ScheduleKind {
+  return typeof value === 'string' && (SCHEDULE_KINDS as string[]).includes(value);
+}
+
+/** Defaults a new schedule of each kind starts from. */
+const KIND_DEFAULTS: Record<ScheduleKind, { weekdays: number[]; hour: number; scope: 'business' | 'personal' | 'all'; formats: string[] }> = {
+  weekly_digest: { weekdays: [1, 5], hour: 8, scope: 'business', formats: ['pdf', 'csv'] },
+  daily_summary: { weekdays: [0, 1, 2, 3, 4, 5, 6], hour: 7, scope: 'all', formats: ['html'] },
+};
 
 export interface EmailScheduleRow {
   id: string;
   merchant_id: string;
-  kind: 'weekly_digest';
+  kind: ScheduleKind;
   weekdays: number[];
   hour: number;
   timezone: string;
@@ -86,7 +103,7 @@ export function toPublicSchedule(row: EmailScheduleRow) {
   };
 }
 
-export async function getSchedule(merchantId: string, kind: 'weekly_digest' = 'weekly_digest'): Promise<EmailScheduleRow | null> {
+export async function getSchedule(merchantId: string, kind: ScheduleKind = 'weekly_digest'): Promise<EmailScheduleRow | null> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from('finance_email_schedules')
@@ -102,23 +119,25 @@ export async function upsertSchedule(
   merchantId: string,
   input: { weekdays?: unknown; hour?: unknown; timezone?: unknown; recipients?: unknown; scope?: unknown; formats?: unknown; active?: unknown },
   defaults: { timezone: string; email: string },
+  kind: ScheduleKind = 'weekly_digest',
 ): Promise<EmailScheduleRow> {
   const supabase = getSupabaseAdmin();
-  const existing = await getSchedule(merchantId);
+  const existing = await getSchedule(merchantId, kind);
+  const base = KIND_DEFAULTS[kind];
 
   const weekdays = input.weekdays === undefined
-    ? existing?.weekdays ?? [1, 5]
+    ? existing?.weekdays ?? base.weekdays
     : (Array.isArray(input.weekdays) ? input.weekdays : []).map((v) => Number(v)).filter((v) => Number.isInteger(v) && v >= 0 && v <= 6);
   if (weekdays.length === 0) throw new ScheduleError('invalid_request', 'weekdays must be a list of 0 (Sunday) to 6 (Saturday)', 400);
-  const hour = input.hour === undefined ? existing?.hour ?? 8 : Number(input.hour);
+  const hour = input.hour === undefined ? existing?.hour ?? base.hour : Number(input.hour);
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) throw new ScheduleError('invalid_request', 'hour must be 0 to 23', 400);
   const timezone = input.timezone === undefined ? existing?.timezone ?? defaults.timezone : String(input.timezone);
   if (!isValidTimeZone(timezone)) throw new ScheduleError('invalid_timezone', 'timezone must be an IANA name', 400);
   const recipients = input.recipients === undefined ? existing?.recipients ?? [defaults.email] : normalizeRecipients(input.recipients);
-  const scope = input.scope === undefined ? existing?.scope ?? 'business' : input.scope;
+  const scope = input.scope === undefined ? existing?.scope ?? base.scope : input.scope;
   if (scope !== 'business' && scope !== 'personal' && scope !== 'all') throw new ScheduleError('invalid_request', 'scope must be business, personal or all', 400);
   const formats = input.formats === undefined
-    ? existing?.formats ?? ['pdf', 'csv']
+    ? existing?.formats ?? base.formats
     : (Array.isArray(input.formats) ? input.formats : []).map(String).filter((f) => ['pdf', 'csv', 'html', 'json'].includes(f));
   if (formats.length === 0) throw new ScheduleError('invalid_request', 'formats must be among pdf, csv, html, json', 400);
   const active = input.active === undefined ? existing?.active ?? true : input.active === true;
@@ -127,19 +146,19 @@ export async function upsertSchedule(
   const { data, error } = await supabase
     .from('finance_email_schedules')
     .upsert(
-      { merchant_id: merchantId, kind: 'weekly_digest', weekdays, hour, timezone, recipients, scope, formats, active, next_run_at: next, updated_at: new Date().toISOString() },
+      { merchant_id: merchantId, kind, weekdays, hour, timezone, recipients, scope, formats, active, next_run_at: next, updated_at: new Date().toISOString() },
       { onConflict: 'merchant_id,kind' },
     )
     .select(COLUMNS)
     .single();
   if (error) throw new Error(`Could not save the schedule: ${error.message}`);
-  await audit(merchantId, 'email_schedule.save', 'schedule', (data as EmailScheduleRow).id, { weekdays: weekdays.join(','), hour, active, recipients: recipients.length });
+  await audit(merchantId, 'email_schedule.save', 'schedule', (data as EmailScheduleRow).id, { kind, weekdays: weekdays.join(','), hour, active, recipients: recipients.length });
   return data as EmailScheduleRow;
 }
 
-export async function deleteSchedule(merchantId: string): Promise<boolean> {
+export async function deleteSchedule(merchantId: string, kind: ScheduleKind = 'weekly_digest'): Promise<boolean> {
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase.from('finance_email_schedules').delete().eq('merchant_id', merchantId).eq('kind', 'weekly_digest').select('id');
+  const { data, error } = await supabase.from('finance_email_schedules').delete().eq('merchant_id', merchantId).eq('kind', kind).select('id');
   if (error) throw new Error(`Could not delete the schedule: ${error.message}`);
   return (data ?? []).length > 0;
 }
@@ -216,6 +235,93 @@ export async function sendDigest(schedule: EmailScheduleRow, now: Date = new Dat
     extraBody: booksEmailBlock(summary, label),
   });
   return { ...outcome, rows: summary.rows, unreviewed: summary.unreviewed };
+}
+
+export async function listSchedules(merchantId: string): Promise<EmailScheduleRow[]> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.from('finance_email_schedules').select(COLUMNS).eq('merchant_id', merchantId).order('kind');
+  if (error) throw new Error(`Could not read schedules: ${error.message}`);
+  return (data ?? []) as EmailScheduleRow[];
+}
+
+/**
+ * Send the daily summary for a schedule: due and overdue across every
+ * account for the next seven days, what was imported since the last
+ * summary, and the balance sheet. Recipients are the schedule's.
+ */
+export async function sendDailySummary(schedule: EmailScheduleRow, now: Date = new Date()): Promise<{ sent: string[]; failed: Array<{ to: string; error: string }>; due: number; overdue: number }> {
+  const { loadDueSoon } = await import('./due-soon-load');
+  const { renderDailySummaryHtml, dailySummarySubject } = await import('./daily-summary');
+  const { listAccounts } = await import('./summary');
+  const { sendEmail } = await import('../email');
+  const { appBaseUrl } = await import('./share');
+
+  const { dueSoon, summary } = await loadDueSoon(schedule.merchant_id, { horizonDays: 7, timezone: schedule.timezone, now });
+
+  // Everything imported since the last summary went out; the first one
+  // looks back a day. Imported, not posted: banks post days late, and a
+  // row that arrives today dated last Tuesday is still news.
+  const since = schedule.last_sent_at ?? new Date(now.getTime() - 86_400_000).toISOString();
+  const accounts = await listAccounts(schedule.merchant_id);
+  const primary = summary.primaryCurrency;
+  let count = 0;
+  let moneyIn = 0;
+  let moneyOut = 0;
+  const debits: Array<{ payee: string; amount: number; accountName: string; posted: string }> = [];
+  if (accounts.length > 0) {
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase
+      .from('finance_transactions')
+      .select('account_id, posted, amount, payee, description')
+      .in('account_id', accounts.map((a) => a.id))
+      .gte('imported_at', since)
+      .order('imported_at', { ascending: false })
+      .limit(1000);
+    if (error) throw new Error(`Could not load new transactions: ${error.message}`);
+    const byId = new Map(accounts.map((a) => [a.id, a]));
+    for (const row of data ?? []) {
+      const account = byId.get(row.account_id as string);
+      if (primary && account && (account.currency || 'USD') !== primary) continue;
+      const amount = Number(row.amount);
+      if (!Number.isFinite(amount)) continue;
+      count += 1;
+      if (amount >= 0) moneyIn += amount;
+      else moneyOut += -amount;
+      // Debits on any account, card purchases included; a payment onto a
+      // card posts positive and is not a charge.
+      if (amount < 0) {
+        debits.push({ payee: String(row.payee || row.description || 'Unknown').slice(0, 60), amount: -amount, accountName: account?.name ?? '', posted: row.posted as string });
+      }
+    }
+  }
+  debits.sort((a, b) => b.amount - a.amount);
+
+  const totals = summary.totals.find((t) => t.currency === primary) ?? summary.totals[0];
+  const input = {
+    due: dueSoon,
+    activity: { count, moneyIn, moneyOut, largest: debits.slice(0, 8), since },
+    position: {
+      currency: primary,
+      assets: totals?.assets ?? 0,
+      liabilities: totals?.liabilities ?? 0,
+      net: totals?.net ?? 0,
+      recurringMonthly: dueSoon.recurring.monthlyTotal,
+      recurringCount: dueSoon.recurring.charges.length,
+    },
+    appUrl: appBaseUrl(),
+  };
+  const subject = dailySummarySubject(input);
+  const html = renderDailySummaryHtml(input);
+
+  const sent: string[] = [];
+  const failed: Array<{ to: string; error: string }> = [];
+  for (const to of schedule.recipients) {
+    const result = await sendEmail({ to, subject, html });
+    if (result.success) sent.push(to);
+    else failed.push({ to, error: result.error ?? 'send failed' });
+  }
+  await audit(schedule.merchant_id, 'daily_summary.email', 'schedule', schedule.id, { recipients: schedule.recipients.length, sent: sent.length, failed: failed.length, due: dueSoon.items.length });
+  return { sent, failed, due: dueSoon.items.length, overdue: dueSoon.items.filter((i) => i.status === 'overdue').length };
 }
 
 /** Due schedules become `email_report` jobs; their next run moves on. */

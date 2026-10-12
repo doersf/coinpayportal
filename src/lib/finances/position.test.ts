@@ -389,6 +389,46 @@ describe('buildPosition — recurring', () => {
     expect(p.recurring.charges[0]?.isDebtService).toBe(true);
     expect(p.recurring.monthlyDebtService).toBe(300);
   });
+
+  it('detects a subscription billed to a card, and keeps it apart from the autopay', () => {
+    const card = account({ id: 'card', name: 'Sapphire', effective_kind: 'credit', is_liability: true, balance: -900 });
+    const p = buildPosition({
+      accounts: [card],
+      transactions: [
+        ...monthlyDates(5, 25).map((posted) => tx({ account_id: 'card', posted, amount: -26.99, payee: 'Netflix' })),
+        ...monthlyDates(5, 3).map((posted) => tx({ account_id: 'card', posted, amount: 300, category: 'payment', payee: 'Netflix' })),
+      ],
+      lookbackDays: 182.64,
+      now: NOW,
+    });
+    const sub = p.recurring.charges.find((c) => !c.isDebtService);
+    const pay = p.recurring.charges.find((c) => c.isDebtService);
+    expect(sub?.amount).toBe(26.99);
+    expect(sub?.accountId).toBe('card');
+    expect(sub?.accountName).toBe('Sapphire');
+    expect(pay?.amount).toBe(300);
+    expect(p.recurring.monthlyDebtService).toBe(300);
+  });
+
+  it('does not call a monthly ETF buy in an investment account a bill', () => {
+    const p = buildPosition({
+      accounts: [account({ id: 'robo', effective_kind: 'investment', balance: 5000 })],
+      transactions: monthlyDates(6).map((posted) => tx({ account_id: 'robo', posted, amount: -149.7, payee: 'Ishares Municipal Bond Etf' })),
+      lookbackDays: 182.64,
+      now: NOW,
+    });
+    expect(p.recurring.charges).toHaveLength(0);
+  });
+
+  it('does not call a recurring balance transfer onto a card a charge', () => {
+    const p = buildPosition({
+      accounts: [account({ id: 'card', effective_kind: 'credit', is_liability: true, balance: -900 })],
+      transactions: monthlyDates(6).map((posted) => tx({ account_id: 'card', posted, amount: -100, category: 'transfer', payee: 'Balance Transfer' })),
+      lookbackDays: 182.64,
+      now: NOW,
+    });
+    expect(p.recurring.charges).toHaveLength(0);
+  });
 });
 
 describe('buildPosition — months and confidence', () => {

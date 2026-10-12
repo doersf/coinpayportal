@@ -156,8 +156,11 @@ export interface RecurringCharge {
   /** The charge normalised to a monthly cost, for summing. */
   monthlyEquivalent: number;
   scope: AccountScope;
-  /** True when it lands on a liability account — a debt payment, not a bill. */
+  /** True when it is a payment landing on a liability account, not a bill. */
   isDebtService: boolean;
+  /** The account it last posted to: the card it bills, or the account it leaves. */
+  accountId: string;
+  accountName: string;
 }
 
 export interface ScopeFlow {
@@ -302,28 +305,48 @@ function matchCadence(gaps: number[]): { name: RecurrenceCadence; perYear: numbe
   return null;
 }
 
-function detectRecurring(
-  rows: Array<{ tx: PositionTransaction; scope: AccountScope; isLiability: boolean }>,
-  now: Date,
-): RecurringCharge[] {
-  const groups = new Map<string, Array<{ tx: PositionTransaction; scope: AccountScope; isLiability: boolean }>>();
+type RecurrenceRow = { tx: PositionTransaction; account: PositionAccount; scope: AccountScope; isLiability: boolean };
+
+/**
+ * Whether a row is money the reader is committed to, and which kind.
+ *
+ * On a deposit account that is any debit. On a card or loan it is either a
+ * purchase — a subscription billed to the card is as much a charge as one
+ * drawn from checking — or a payment landing on it, which is debt service.
+ * The two are grouped apart so a card's autopay never merges with what it
+ * pays for. An investment account's debits are purchases of assets the
+ * reader still owns (a monthly ETF buy), not obligations, so they are left
+ * out entirely.
+ */
+function recurrenceSide(row: RecurrenceRow): 'charge' | 'debt' | null {
+  if (row.account.effective_kind === 'investment') return null;
+  if (row.isLiability) {
+    if (row.tx.amount > 0) return 'debt';
+    // A refund or reversal posts positive and is excluded above; a purchase
+    // that is internally categorised (a balance transfer) is not a bill.
+    return INTERNAL_CATEGORIES.has(String(row.tx.category ?? '')) ? null : 'charge';
+  }
+  return row.tx.amount < 0 ? 'charge' : null;
+}
+
+function detectRecurring(rows: RecurrenceRow[], now: Date): RecurringCharge[] {
+  const groups = new Map<string, RecurrenceRow[]>();
 
   for (const row of rows) {
-    // A recurring obligation is money leaving on a deposit account, or a
-    // payment landing on a card. Ordinary card purchases are debits too, so
-    // both signs qualify depending on which side of the feed the row is on.
-    const isOutflow = row.isLiability ? row.tx.amount > 0 : row.tx.amount < 0;
-    if (!isOutflow) continue;
+    const side = recurrenceSide(row);
+    if (!side) continue;
     const key = recurrenceKey(row.tx);
     if (key.length < 3) continue;
-    const list = groups.get(key);
+    const groupKey = `${side}:${key}`;
+    const list = groups.get(groupKey);
     if (list) list.push(row);
-    else groups.set(key, [row]);
+    else groups.set(groupKey, [row]);
   }
 
   const charges: RecurringCharge[] = [];
 
-  for (const [key, list] of groups) {
+  for (const [groupKey, list] of groups) {
+    const key = groupKey.slice(groupKey.indexOf(':') + 1);
     if (list.length < 3) continue;
 
     const sorted = [...list].sort((a, b) => a.tx.posted.localeCompare(b.tx.posted));
@@ -362,7 +385,9 @@ function detectRecurring(
       nextExpected: new Date(lastTime + intervalDays * 86_400_000).toISOString(),
       monthlyEquivalent: round2((typicalAmount * cadence.perYear) / 12),
       scope: last.scope,
-      isDebtService: last.isLiability,
+      isDebtService: groupKey.startsWith('debt:'),
+      accountId: last.account.id,
+      accountName: last.account.name,
     });
   }
 
@@ -628,7 +653,7 @@ export function buildPosition({
   // ── Recurring ──
 
   const charges = detectRecurring(
-    rows.map((r) => ({ tx: r.tx, scope: r.scope, isLiability: r.isLiability })),
+    rows.map((r) => ({ tx: r.tx, account: r.account, scope: r.scope, isLiability: r.isLiability })),
     now,
   );
   const recurringMonthly = charges.reduce((t, c) => t + c.monthlyEquivalent, 0);

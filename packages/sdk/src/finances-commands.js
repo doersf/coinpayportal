@@ -837,6 +837,80 @@ export async function runFinancesCommand(subcommand, args, flags, ctx) {
         throw new CliExit(EXIT.INVALID, 'Usage: coinpay finances digest [show|set --days mon,fri --hour 8 --to a@x,b@y [--scope business]|off|delete|send-now]');
       }
 
+      case 'due':
+      case 'due-soon':
+      case 'recurring': {
+        const days = flags.days !== undefined ? Number(flags.days) : undefined;
+        if (days !== undefined && (!Number.isInteger(days) || days < 0 || days > 60)) throw new CliExit(EXIT.INVALID, '--days must be 0 to 60');
+        const d = await api.getDueSoon(client, { days, timezone: typeof flags.timezone === 'string' ? flags.timezone : undefined });
+        const cur = d.currency || 'USD';
+        const money = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(n);
+        if (subcommand === 'recurring') {
+          if (json) { out(JSON.stringify(d.recurring, null, 2)); return EXIT.OK; }
+          const rows = [...d.recurring.charges].sort((a, b) => a.nextExpected.localeCompare(b.nextExpected));
+          out(`${rows.length} recurring charges · ${money(d.recurring.monthlyTotal)}/mo${d.recurring.monthlyDebtService ? ` (${money(d.recurring.monthlyDebtService)} debt service)` : ''}`);
+          for (const c of rows) {
+            out(`  next ${c.nextExpected.slice(0, 10)}  ${c.cadence.padEnd(9)} ${money(c.amount).padStart(11)}  ${c.payee}  · ${c.accountName}${c.isDebtService ? ' · debt' : ''}`);
+          }
+          return EXIT.OK;
+        }
+        if (json) { out(JSON.stringify(d, null, 2)); return EXIT.OK; }
+        const when = (i) => i.status === 'paid' ? 'paid' : i.status === 'awaiting' ? 'not yet?' : i.daysUntil === 0 ? 'today' : i.daysUntil === 1 ? 'tomorrow' : i.daysUntil < 0 ? `${-i.daysUntil}d LATE` : `in ${i.daysUntil}d`;
+        const amt = (i) => i.amount !== null ? money(i.amount) : i.owed !== null ? `bal ${money(i.owed)}` : 'statement';
+        out(`${d.today} (${d.timezone}) · ${money(d.totals.due)} due in ${d.horizonDays} days${d.totals.overdue ? ` · ${money(d.totals.overdue)} OVERDUE` : ''}${d.totals.unpriced ? ` · +${d.totals.unpriced} statement balance(s)` : ''}`);
+        if (d.items.length === 0 && d.paid.length === 0) out('  Nothing due.');
+        for (const i of [...d.items, ...d.paid]) {
+          out(`  ${i.dueOn}  ${when(i).padEnd(9)} ${amt(i).padStart(14)}  ${i.payee}  · ${i.accountName}${i.source === 'scheduled' ? ' · statement due' : ''}`);
+        }
+        if (d.missed.length) out(`  Not seen lately: ${d.missed.slice(0, 8).map((m) => `${m.payee} (expected ${m.expectedOn})`).join(', ')}`);
+        return EXIT.OK;
+      }
+
+      case 'due-day': {
+        const id = args[0];
+        const value = args[1];
+        if (!id || value === undefined) throw new CliExit(EXIT.INVALID, 'Usage: coinpay finances due-day <account-id> <1-31|clear> [--amount 810.46|--amount balance]  (ids: coinpay finances accounts)');
+        const day = value === 'clear' || value === 'off' ? null : Number(value);
+        if (day !== null && (!Number.isInteger(day) || day < 1 || day > 31)) throw new CliExit(EXIT.INVALID, 'The due day must be 1 to 31, or clear');
+        const amount = flags.amount === undefined ? undefined : flags.amount === 'balance' || flags.amount === true ? null : String(flags.amount);
+        const account = await api.setAccountDueDay(client, id, { day, amount });
+        emit({ account }, day === null ? `Cleared the due day on ${account.name}.` : `${account.name}: due on day ${day}${account.payment_due_amount != null ? `, ${account.payment_due_amount}` : ', statement balance'}.`);
+        return EXIT.OK;
+      }
+
+      case 'daily': {
+        const action = flags.off ? 'off' : args[0] || 'show';
+        const describe = (s) => s
+          ? `Daily summary ${s.active ? 'on' : 'off'} · ${String(s.hour).padStart(2, '0')}:00 ${s.timezone} · to ${s.recipients.join(', ')}${s.nextRunAt ? ` · next ${s.nextRunAt}` : ''}${s.lastSentAt ? ` · last ${s.lastSentAt}` : ''}`
+          : 'No daily summary configured. Turn it on with: coinpay finances daily on --hour 7 --to you@example.com';
+        if (action === 'show') {
+          const s = await api.getDailySummary(client);
+          emit({ schedule: s }, describe(s));
+          return EXIT.OK;
+        }
+        if (action === 'on' || action === 'set') {
+          const s = await api.setDailySummary(client, {
+            hour: flags.hour !== undefined ? Number(flags.hour) : undefined,
+            timezone: typeof flags.timezone === 'string' ? flags.timezone : undefined,
+            recipients: flags.to ? listFlag(flags.to) : undefined,
+            active: true,
+          });
+          emit({ schedule: s }, describe(s));
+          return EXIT.OK;
+        }
+        if (action === 'off' || action === 'delete') {
+          const data = await api.deleteDailySummary(client);
+          emit(data, 'Daily summary turned off.');
+          return EXIT.OK;
+        }
+        if (action === 'send-now') {
+          const data = await api.sendDailySummaryNow(client);
+          emit(data, `Sent to ${data.sent.join(', ') || 'nobody'} (${data.due} due, ${data.overdue} overdue)${data.failed.length ? `; failed: ${data.failed.map((f) => `${f.to} (${f.error})`).join(', ')}` : ''}`);
+          return data.sent.length > 0 ? EXIT.OK : EXIT.FAILURE;
+        }
+        throw new CliExit(EXIT.INVALID, 'Usage: coinpay finances daily [show|on --hour 7 --to a@x|off|send-now]');
+      }
+
       case 'payloads': {
         const action = args[0] || 'list';
         if (action === 'list') {
@@ -872,4 +946,4 @@ export async function runFinancesCommand(subcommand, args, flags, ctx) {
   }
 }
 
-export const EXTENDED_SUBCOMMANDS = ['connect', 'disconnect', 'consent', 'backfill', 'jobs', 'coverage', 'report', 'reports', 'statements', 'books', 'payloads', 'digest'];
+export const EXTENDED_SUBCOMMANDS = ['connect', 'disconnect', 'consent', 'backfill', 'jobs', 'coverage', 'report', 'reports', 'statements', 'books', 'payloads', 'digest', 'due', 'due-soon', 'recurring', 'due-day', 'daily'];

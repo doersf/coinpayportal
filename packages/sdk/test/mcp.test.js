@@ -39,6 +39,38 @@ describe('handleMessage', () => {
     expect(JSON.parse(res.result.content[0].text)).toMatchObject({ missing: 0 });
   });
 
+  it('carries the cache fields Claude Code requires on tools/list', async () => {
+    const res = await handleMessage({ jsonrpc: '2.0', id: 6, method: 'tools/list' }, ctx({}));
+    expect(res.result).toMatchObject({ resultType: 'complete', ttlMs: 0, cacheScope: 'private' });
+    const names = res.result.tools.map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining(['finance_due_soon', 'finance_recurring', 'finance_summary', 'finance_transactions', 'finance_set_due_day', 'finance_daily_summary']));
+  });
+
+  it('answers finance_due_soon from the due-soon route', async () => {
+    const calls = [];
+    const client = {
+      request: async (endpoint) => {
+        calls.push(endpoint);
+        return { dueSoon: { today: '2026-10-12', items: [{ payee: 'Netflix', amount: 26.99 }], totals: { due: 26.99 }, recurring: { charges: [], monthlyTotal: 400 } } };
+      },
+    };
+    const res = await handleMessage({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'finance_due_soon', arguments: { days: 14 } } }, ctx(client));
+    expect(calls).toEqual(['/finances/due-soon?days=14']);
+    const body = JSON.parse(res.result.content[0].text);
+    expect(body.items[0].payee).toBe('Netflix');
+    expect(body.recurringMonthlyTotal).toBe(400);
+    expect(body.recurring).toBeUndefined();
+  });
+
+  it('turns the daily summary on through the schedules route', async () => {
+    const calls = [];
+    const client = { request: async (endpoint, init) => { calls.push([endpoint, init?.method, init?.body && JSON.parse(init.body)]); return { schedule: { kind: 'daily_summary', active: true } }; } };
+    await handleMessage({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'finance_daily_summary', arguments: { action: 'on', hour: 7 } } }, ctx(client));
+    expect(calls[0][0]).toBe('/finances/email-schedules');
+    expect(calls[0][1]).toBe('POST');
+    expect(calls[0][2]).toMatchObject({ kind: 'daily_summary', hour: 7, active: true });
+  });
+
   it('reports a tool failure as an error result, not a protocol error', async () => {
     const res = await handleMessage({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'statements_list', arguments: {} } }, { ...ctx(null), getClient: async () => { throw new Error('Not logged in'); } });
     expect(res.result.isError).toBe(true);

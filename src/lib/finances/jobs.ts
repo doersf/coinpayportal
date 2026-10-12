@@ -576,7 +576,7 @@ async function runCategorizeJob(initial: FinanceJobRow): Promise<void> {
  */
 async function runEmailJob(initial: FinanceJobRow): Promise<void> {
   const job = initial;
-  const { getScheduleById, sendDigest, markDigestSent } = await import('./schedules');
+  const { getScheduleById, sendDigest, sendDailySummary, markDigestSent } = await import('./schedules');
   const scheduleId = job.params.scheduleId as string | undefined;
   const reportId = job.params.reportId as string | undefined;
   const books = job.params.books as { period?: string; from?: string; to?: string; timezone: string; scope: 'business' | 'personal' | 'all' } | undefined;
@@ -620,6 +620,15 @@ async function runEmailJob(initial: FinanceJobRow): Promise<void> {
     const schedule = await getScheduleById(scheduleId!, job.merchant_id);
     if (!schedule || !schedule.active) {
       await releaseWithStatus(job, 'cancelled', { error_message: 'Schedule no longer active' });
+      return;
+    }
+    if (schedule.kind === 'daily_summary') {
+      const daily = await sendDailySummary(schedule);
+      if (daily.sent.length > 0) await markDigestSent(scheduleId!);
+      await releaseWithStatus(job, daily.failed.length === 0 ? 'completed' : daily.sent.length > 0 ? 'partial' : 'failed', {
+        result: { sent: daily.sent.length, failed: daily.failed, due: daily.due, overdue: daily.overdue },
+        ...(daily.sent.length === 0 ? { error_code: 'email_failed', error_message: daily.failed[0]?.error ?? 'send failed' } : {}),
+      });
       return;
     }
     const outcome = await sendDigest(schedule);

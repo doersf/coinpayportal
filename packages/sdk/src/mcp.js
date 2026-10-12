@@ -13,7 +13,7 @@
 import { createInterface } from 'node:readline';
 
 import * as reports from './finances-reports.js';
-import { listFinanceAccounts } from './finances.js';
+import { getFinanceSummary, listFinanceAccounts, listFinanceTransactions } from './finances.js';
 import * as sf from './statements-fetch.js';
 
 export const PROTOCOL_VERSION = '2025-06-18';
@@ -27,6 +27,88 @@ export const TOOLS = [
     description: 'List the linked bank and card accounts (institution, name, kind, balance, id).',
     inputSchema: { type: 'object', properties: { includeHidden: { type: 'boolean' } }, additionalProperties: false },
     handler: async (args, { client }) => text({ accounts: await listFinanceAccounts(client, { includeHidden: args.includeHidden === true }) }),
+  },
+  {
+    name: 'finance_due_soon',
+    description:
+      'What is due across every linked account: overdue, today and the next N days. Projected from each recurring charge\'s own cadence, plus statement due days set on cards and loans. Also lists charges that stopped appearing ("missed") and paid-this-cycle statements.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        days: { type: 'integer', minimum: 0, maximum: 60, description: 'Horizon in days (default 7)' },
+        timezone: { type: 'string', description: 'IANA zone for "today"; defaults to the saved finance timezone' },
+      },
+      additionalProperties: false,
+    },
+    handler: async (args, { client }) => {
+      const { recurring, ...due } = await reports.getDueSoon(client, { days: args.days, timezone: args.timezone });
+      return text({ ...due, recurringMonthlyTotal: recurring.monthlyTotal });
+    },
+  },
+  {
+    name: 'finance_recurring',
+    description: 'Every recurring charge detected across all accounts (subscriptions, bills, loan and card payments): cadence, typical amount, last and next date, monthly equivalent.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    handler: async (_args, { client }) => text((await reports.getDueSoon(client, { days: 0 })).recurring),
+  },
+  {
+    name: 'finance_summary',
+    description: 'Balance sheet (assets, debt, net by currency), cashflow for the window, top spending categories, and the debt-and-income position.',
+    inputSchema: { type: 'object', properties: { days: { type: 'integer', minimum: 1, maximum: 3650, description: 'Cashflow window (default 30)' } }, additionalProperties: false },
+    handler: async (args, { client }) => text(await getFinanceSummary(client, { days: args.days || 30 })),
+  },
+  {
+    name: 'finance_transactions',
+    description: 'The bank and card ledger, newest first. Filter by account id, text search, category or date range (YYYY-MM-DD).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        accountId: { type: 'string' },
+        search: { type: 'string' },
+        category: { type: 'string' },
+        startDate: { type: 'string' },
+        endDate: { type: 'string' },
+        limit: { type: 'integer', minimum: 1, maximum: 500 },
+        offset: { type: 'integer', minimum: 0 },
+      },
+      additionalProperties: false,
+    },
+    handler: async (args, { client }) => text(await listFinanceTransactions(client, { ...args, limit: args.limit || 50 })),
+  },
+  {
+    name: 'finance_set_due_day',
+    description: 'Set or clear a card or loan\'s statement due day (1-31, null clears) and optionally a fixed monthly amount (null = statement balance). Puts the account on the due-soon list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        accountId: { type: 'string' },
+        day: { type: ['integer', 'null'], minimum: 1, maximum: 31 },
+        amount: { type: ['number', 'string', 'null'] },
+      },
+      required: ['accountId', 'day'],
+      additionalProperties: false,
+    },
+    handler: async (args, { client }) => text({ account: await reports.setAccountDueDay(client, args.accountId, { day: args.day, amount: args.amount }) }),
+  },
+  {
+    name: 'finance_daily_summary',
+    description: 'The daily summary email (due soon, new activity, position): show it, turn it on (optionally hour 0-23 and recipients), turn it off, or send one now.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['show', 'on', 'off', 'send_now'] },
+        hour: { type: 'integer', minimum: 0, maximum: 23 },
+        to: { type: 'array', items: { type: 'string' }, maxItems: 5 },
+      },
+      required: ['action'],
+      additionalProperties: false,
+    },
+    handler: async (args, { client }) => {
+      if (args.action === 'on') return text({ schedule: await reports.setDailySummary(client, { hour: args.hour, recipients: args.to, active: true }) });
+      if (args.action === 'off') return text(await reports.deleteDailySummary(client));
+      if (args.action === 'send_now') return text(await reports.sendDailySummaryNow(client));
+      return text({ schedule: await reports.getDailySummary(client) });
+    },
   },
   {
     name: 'statements_list',
@@ -149,7 +231,7 @@ export async function handleMessage(message, ctx) {
         capabilities: { tools: {} },
         serverInfo: { name: 'coinpay', version: ctx.version || '0.0.0' },
         instructions:
-          'CoinPay finances. Statement PDFs come from the banks themselves (SimpleFIN has none): statements_coverage shows what is missing, statements_fetch downloads what is new on this machine. A bank marked login_needed needs a person to run `coinpay finances statements login <bank>`. Tax notices, letters and transcripts (California FTB, IRS) are in tax_documents_list; tax data stays on CoinPay surfaces and is never sent elsewhere.',
+          'CoinPay finances. finance_due_soon answers "what is due" across every account; finance_recurring lists subscriptions and bills; finance_summary is the balance sheet. Statement PDFs come from the banks themselves (SimpleFIN has none): statements_coverage shows what is missing, statements_fetch downloads what is new on this machine. A bank marked login_needed needs a person to run `coinpay finances statements login <bank>`. Tax notices, letters and transcripts (California FTB, IRS) are in tax_documents_list; tax data stays on CoinPay surfaces and is never sent elsewhere.',
       });
     case 'notifications/initialized':
     case 'notifications/cancelled':
@@ -157,7 +239,9 @@ export async function handleMessage(message, ctx) {
     case 'ping':
       return reply({});
     case 'tools/list':
-      return reply({ tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
+      // Claude Code's client (revision 2026-07-28) rejects a whole list that
+      // lacks these three cache fields, showing "tools fetch failed".
+      return reply({ tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), resultType: 'complete', ttlMs: 0, cacheScope: 'private' });
     case 'tools/call': {
       const tool = TOOLS.find((t) => t.name === params.name);
       if (!tool) return fail(-32602, `Unknown tool: ${params.name}`);

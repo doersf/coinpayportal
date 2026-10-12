@@ -5,6 +5,28 @@ All notable changes to `@profullstack/coinpay` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-10-12
+
+### Added
+- `coinpay finances due [--days 7]`: what is due, overdue or not posted yet
+  across every linked account, projected from each recurring charge's own
+  cadence plus statement due days set on cards and loans.
+- `coinpay finances recurring`: every recurring charge with cadence, last and
+  next date and monthly cost.
+- `coinpay finances due-day <account-id> <1-31|clear> [--amount N|balance]`:
+  a card or loan's statement due day, which no bank feed carries.
+- `coinpay finances daily [show|on|off|send-now]`: the daily summary email
+  (due soon, new activity since the last one, balance sheet).
+- MCP: `finance_due_soon`, `finance_recurring`, `finance_summary`,
+  `finance_transactions`, `finance_set_due_day`, `finance_daily_summary`.
+- SDK: `getDueSoon`, `getDailySummary`, `setDailySummary`,
+  `deleteDailySummary`, `sendDailySummaryNow`, `setAccountDueDay`.
+
+### Fixed
+- `coinpay mcp` `tools/list` now carries `resultType`, `ttlMs` and
+  `cacheScope`; without them Claude Code rejected the whole list
+  ("connected · tools fetch failed").
+
 ## [0.14.0] - 2026-10-05
 
 ### Added

@@ -395,3 +395,44 @@ export function setWeeklyDigest(
 ): Promise<WeeklyDigest>;
 export function deleteWeeklyDigest(client: CoinPayClient): Promise<{ success: boolean }>;
 export function sendWeeklyDigestNow(client: CoinPayClient): Promise<SendOutcome>;
+
+export interface DueItem {
+  source: 'projected' | 'scheduled';
+  payee: string;
+  amount: number | null;
+  owed: number | null;
+  cadence: string;
+  dueOn: string;
+  daysUntil: number;
+  status: 'overdue' | 'awaiting' | 'today' | 'soon' | 'paid';
+  accountId: string;
+  accountName: string;
+  scope: 'business' | 'personal';
+  isDebtService: boolean;
+}
+
+export interface DueSoon {
+  timezone: string;
+  today: string;
+  horizonDays: number;
+  items: DueItem[];
+  paid: DueItem[];
+  missed: Array<{ payee: string; amount: number; expectedOn: string; lastSeen: string; accountName: string }>;
+  totals: { due: number; overdue: number; unpriced: number };
+  recurring: {
+    charges: Array<{ payee: string; amount: number; cadence: string; occurrences: number; lastSeen: string; nextExpected: string; monthlyEquivalent: number; scope: 'business' | 'personal'; isDebtService: boolean; accountId: string; accountName: string }>;
+    monthlyTotal: number;
+    monthlyDebtService: number;
+  };
+  currency: string | null;
+}
+
+export function getDueSoon(client: CoinPayClient, opts?: { days?: number; timezone?: string }): Promise<DueSoon>;
+export function getDailySummary(client: CoinPayClient): Promise<WeeklyDigest | null>;
+export function setDailySummary(
+  client: CoinPayClient,
+  opts?: { weekdays?: number[]; hour?: number; timezone?: string; recipients?: string[]; active?: boolean },
+): Promise<WeeklyDigest>;
+export function deleteDailySummary(client: CoinPayClient): Promise<{ success: boolean }>;
+export function sendDailySummaryNow(client: CoinPayClient): Promise<{ sent: string[]; failed: Array<{ to: string; error: string }>; due: number; overdue: number }>;
+export function setAccountDueDay(client: CoinPayClient, accountId: string, opts: { day: number | null; amount?: number | string | null }): Promise<Record<string, unknown>>;

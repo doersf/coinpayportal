@@ -66,7 +66,7 @@ const KIND_PATTERNS: Array<{ kind: AccountKind; pattern: RegExp }> = [
 
   {
     kind: 'investment',
-    pattern: /\b(brokerage|invest(ment)?|ira|roth|401\s?k|403\s?b|hsa|529|portfolio|securities|trading)\b/i,
+    pattern: /\b(brokerage|invest(ment)?|ira|roth|401\s?k|403\s?b|hsa|529|portfolio|securities|trading|robo)\b/i,
   },
 
   { kind: 'checking', pattern: /\b(checking|chequing|draft|share draft|debit)\b/i },

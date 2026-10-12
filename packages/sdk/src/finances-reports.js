@@ -445,3 +445,42 @@ export async function deleteWeeklyDigest(client) {
 export async function sendWeeklyDigestNow(client) {
   return call(client, '/finances/email-schedules/send-now', { method: 'POST', body: '{}' });
 }
+
+/** Charges due across every account: projected recurring charges plus statement due days. */
+export async function getDueSoon(client, { days, timezone } = {}) {
+  const params = new URLSearchParams();
+  if (days !== undefined) params.set('days', String(days));
+  if (timezone) params.set('timezone', timezone);
+  const qs = params.toString();
+  const data = await call(client, `/finances/due-soon${qs ? `?${qs}` : ''}`);
+  return data.dueSoon;
+}
+
+export async function getDailySummary(client) {
+  const data = await call(client, '/finances/email-schedules?kind=daily_summary');
+  return data.schedule;
+}
+
+export async function setDailySummary(client, { weekdays, hour, timezone, recipients, active } = {}) {
+  const data = await call(client, '/finances/email-schedules', {
+    method: 'POST',
+    body: JSON.stringify({ kind: 'daily_summary', weekdays, hour, timezone, recipients, active }),
+  });
+  return data.schedule;
+}
+
+export async function deleteDailySummary(client) {
+  return call(client, '/finances/email-schedules?kind=daily_summary', { method: 'DELETE' });
+}
+
+export async function sendDailySummaryNow(client) {
+  return call(client, '/finances/email-schedules/send-now?kind=daily_summary', { method: 'POST', body: '{}' });
+}
+
+/** Set (or clear with day null) a card or loan's statement due day and fixed amount. */
+export async function setAccountDueDay(client, accountId, { day, amount } = {}) {
+  const body = { payment_due_day: day ?? null };
+  if (amount !== undefined) body.payment_due_amount = amount;
+  const data = await call(client, `/finances/accounts/${encodeURIComponent(accountId)}`, { method: 'PATCH', body: JSON.stringify(body) });
+  return data.account;
+}

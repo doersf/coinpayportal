@@ -527,6 +527,10 @@ ${colors.cyan}Commands:${colors.reset}
                             --with-documents attaches the period's tax documents within
                             8 MiB; only to your own address)
     digest [show|set|off|send-now]  Weekly digest email (--days mon,fri --hour 8 --to …)
+    due [--days 7]        What is due and overdue across every account (--days up to 60)
+    recurring             Every recurring charge detected, with next date and monthly cost
+    due-day <id> <1-31|clear>  A card/loan's statement due day (--amount 810.46, or balance)
+    daily [show|on|off|send-now]  Daily summary email: due soon, new activity, position (--hour 7 --to …)
 
   ${colors.bright}escrow${colors.reset}
     create                Create a new escrow
@@ -4353,7 +4357,12 @@ async function handleFinances(subcommand, args, flags) {
     case 'statements':
     case 'books':
     case 'payloads':
-    case 'digest': {
+    case 'digest':
+    case 'due':
+    case 'due-soon':
+    case 'recurring':
+    case 'due-day':
+    case 'daily': {
       const { client } = financesClient();
       const { runFinancesCommand } = await import('../src/finances-commands.js');
       const code = await runFinancesCommand(subcommand, args, flags, {
@@ -4367,7 +4376,7 @@ async function handleFinances(subcommand, args, flags) {
 
     default:
       print.error(`Unknown finances command: ${subcommand}`);
-      console.log('Usage: coinpay finances [tui|summary|accounts|ledger|connections|sync|connect|disconnect|backfill|jobs|coverage|report|reports|statements|books|payloads|digest]');
+      console.log('Usage: coinpay finances [tui|summary|accounts|ledger|connections|sync|connect|disconnect|backfill|jobs|coverage|report|reports|statements|books|payloads|digest|due|recurring|due-day|daily]');
       process.exit(1);
   }
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePlaidLink } from './usePlaidLink';
 import ReportsAndStatements from './ReportsAndStatements';
+import DueSoonSection from './DueSoonSection';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { requireAuth } from '@/lib/auth/client';
@@ -34,6 +35,8 @@ type Account = {
   is_liability: boolean;
   display_balance: number | null;
   is_hidden: boolean;
+  payment_due_day?: number | null;
+  payment_due_amount?: number | null;
 };
 
 type Transaction = {
@@ -608,6 +611,9 @@ export default function FinancesContent({ focus = null }: { focus?: 'reports' | 
             </label>
           </div>
 
+          {/* ---------------- due soon + recurring ---------------- */}
+          <DueSoonSection authHeaders={authHeaders} refreshKey={summary} />
+
           {/* ---------------- accounts ---------------- */}
           <section className="mb-10">
             <h2 className="text-lg font-semibold text-white mb-4">Accounts</h2>
@@ -683,6 +689,41 @@ export default function FinancesContent({ focus = null }: { focus?: 'reports' | 
                                   </option>
                                 ))}
                               </select>
+                              {account.is_liability && (
+                                <span className="ml-2 inline-flex items-center gap-1 text-xs text-gray-500">
+                                  Due day
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={31}
+                                    defaultValue={account.payment_due_day ?? ''}
+                                    placeholder="—"
+                                    onBlur={(e) => {
+                                      const next = e.target.value === '' ? null : Number(e.target.value);
+                                      if (next !== (account.payment_due_day ?? null)) {
+                                        void updateAccount(account.id, { payment_due_day: next });
+                                      }
+                                    }}
+                                    className="w-12 rounded border border-slate-700 bg-slate-950 px-1 py-1 text-xs text-gray-300"
+                                    aria-label={`Statement due day for ${account.name}`}
+                                  />
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="0.01"
+                                    defaultValue={account.payment_due_amount ?? ''}
+                                    placeholder="balance"
+                                    onBlur={(e) => {
+                                      const next = e.target.value === '' ? null : e.target.value;
+                                      if ((next === null ? null : Number(next)) !== (account.payment_due_amount ?? null)) {
+                                        void updateAccount(account.id, { payment_due_amount: next });
+                                      }
+                                    }}
+                                    className="w-20 rounded border border-slate-700 bg-slate-950 px-1 py-1 text-xs text-gray-300"
+                                    aria-label={`Amount due each month for ${account.name}`}
+                                  />
+                                </span>
+                              )}
                               <button
                                 onClick={() =>
                                   updateAccount(account.id, { is_hidden: !account.is_hidden })
