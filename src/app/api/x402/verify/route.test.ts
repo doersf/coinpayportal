@@ -900,3 +900,175 @@ describe('POST /api/x402/verify — key scopes (REC-C-03)', () => {
     expect(res.status).not.toBe(403);
   });
 });
+
+/**
+ * Nano (XNO): the payer publishes a send block to the merchant and presents its
+ * hash. Verification asks the node configured in NANO_RPC_URL whether that
+ * block is a confirmed send of at least the price to `expected.payTo`.
+ */
+describe('POST /api/x402/verify — Nano', () => {
+  const MERCHANT = 'nano_13r91w5ig3r91w5ig3r91w5ig3r91w5ig3r91w5ig3r91w5ig3r96fwyt1ed';
+  const PAYER = 'nano_14ab366ik4ab366ik4ab366ik4ab366ik4ab366ik4ab366ik4abqxiq5hbd';
+  const OTHER = 'nano_14rd3e7ip4rd3e7ip4rd3e7ip4rd3e7ip4rd3e7ip4rd3e7ip4rd359hqeg9';
+  const HASH = 'b'.repeat(64);
+  const PRICE = '1000000000000000000000000000'; // 0.001 XNO in raw
+
+  function nanoPayment(overrides: any = {}) {
+    return {
+      scheme: 'exact',
+      payload: {
+        network: 'nano',
+        scheme: 'exact',
+        from: PAYER,
+        to: MERCHANT,
+        amount: PRICE,
+        blockHash: HASH,
+        resource: RESOURCE,
+        ...overrides,
+      },
+    };
+  }
+
+  const nanoExpectation = { amount: PRICE, resource: RESOURCE, payTo: MERCHANT };
+
+  function nodeAnswers(block: Record<string, unknown>) {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => block });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  function confirmedSend(overrides: Record<string, unknown> = {}) {
+    return {
+      block_account: PAYER,
+      amount: PRICE,
+      confirmed: 'true',
+      subtype: 'send',
+      contents: { type: 'state', account: PAYER, link_as_account: MERCHANT },
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+    mockInsert.mockReturnValue({ error: null });
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co';
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-key';
+    process.env.NANO_RPC_URL = 'https://nano-node.test/rpc';
+    mockResolveScopedKey.mockResolvedValue({
+      keyId: 'key1',
+      business: { id: 'biz1', merchant_id: 'm1', name: 'Biz', active: true },
+      scopes: ['payments:create'],
+    });
+  });
+
+  it('accepts a confirmed send block to the merchant and records its hash', async () => {
+    const fetchMock = nodeAnswers(confirmedSend());
+
+    const res = await POST(makeRequest({ payment: nanoPayment(), expected: nanoExpectation }));
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.valid).toBe(true);
+    expect(data.payment.network).toBe('nano');
+    expect(data.payment.pendingConfirmation).toBe(false);
+
+    expect(fetchMock).toHaveBeenCalledWith('https://nano-node.test/rpc', expect.objectContaining({ method: 'POST' }));
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      action: 'block_info',
+      json_block: 'true',
+      hash: HASH.toUpperCase(),
+    });
+
+    const row = mockInsert.mock.calls.at(-1)![0];
+    expect(row.network).toBe('nano');
+    expect(row.to_address).toBe(MERCHANT);
+    expect(row.unique_key).toBe(HASH.toUpperCase());
+  });
+
+  it('keys replay on the block hash, not on a payer-chosen nonce', async () => {
+    nodeAnswers(confirmedSend());
+
+    await POST(makeRequest({ payment: nanoPayment({ nonce: 'n-1' }), expected: nanoExpectation }));
+    await POST(makeRequest({ payment: nanoPayment({ nonce: 'n-2' }), expected: nanoExpectation }));
+
+    const keys = mockInsert.mock.calls.map((call) => call[0].unique_key);
+    expect(keys).toEqual([HASH.toUpperCase(), HASH.toUpperCase()]);
+  });
+
+  it('reports a replay of the same block hash', async () => {
+    nodeAnswers(confirmedSend());
+    mockInsert.mockReturnValueOnce({ error: { code: '23505' } });
+
+    const res = await POST(makeRequest({ payment: nanoPayment(), expected: nanoExpectation }));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/replay/i);
+  });
+
+  it('rejects an on-chain underpayment even when the payload claims the full price', async () => {
+    nodeAnswers(confirmedSend({ amount: '999999999999999999999999999' }));
+
+    const res = await POST(makeRequest({ payment: nanoPayment(), expected: nanoExpectation }));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/^Underpayment/);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unconfirmed block', async () => {
+    nodeAnswers(confirmedSend({ confirmed: 'false' }));
+
+    const res = await POST(makeRequest({ payment: nanoPayment(), expected: nanoExpectation }));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('Nano block is not confirmed');
+  });
+
+  it('rejects a block that sends to someone other than the merchant', async () => {
+    nodeAnswers(confirmedSend({ contents: { type: 'state', account: PAYER, link_as_account: OTHER } }));
+
+    const res = await POST(makeRequest({ payment: nanoPayment(), expected: nanoExpectation }));
+
+    expect(res.status).toBe(400);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects a receive block', async () => {
+    nodeAnswers(confirmedSend({ subtype: 'receive' }));
+
+    const res = await POST(makeRequest({ payment: nanoPayment(), expected: nanoExpectation }));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/not a send/);
+  });
+
+  it('rejects a malformed block hash without calling the node', async () => {
+    const fetchMock = nodeAnswers(confirmedSend());
+
+    const res = await POST(makeRequest({ payment: nanoPayment({ blockHash: 'xyz' }), expected: nanoExpectation }));
+
+    expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the node is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+
+    const res = await POST(makeRequest({ payment: nanoPayment(), expected: nanoExpectation }));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/Could not verify the Nano block/);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when no Nano node is configured', async () => {
+    delete process.env.NANO_RPC_URL;
+    const fetchMock = nodeAnswers(confirmedSend());
+
+    const res = await POST(makeRequest({ payment: nanoPayment(), expected: nanoExpectation }));
+
+    expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

@@ -2,7 +2,7 @@
  * x402 Payment Protocol Support
  * 
  * CoinPayPortal as the first multi-chain, multi-asset x402 facilitator.
- * Supports native crypto (BTC, ETH, SOL, POL), USDC stablecoins,
+ * Supports native crypto (BTC, ETH, SOL, POL, XNO), USDC stablecoins,
  * Lightning (BOLT12), and Stripe fiat — all via HTTP 402.
  *
  * Note: Bitcoin Cash is intentionally not listed. The x402 settle path has no
@@ -92,6 +92,18 @@ export const PAYMENT_METHODS = {
     label: 'USDC on Base',
   },
 
+  // ── Nano ───────────────────────────────────────────────────────
+  // Opt-in: only advertised when `payTo` names a Nano address (`payTo.nano`
+  // or a `nano_` string) and an XNO amount can be quoted (`rates.XNO`, or a
+  // raw `amount`). The payer sends a block; the proof carries its `blockHash`.
+  xno: {
+    network: 'nano',
+    asset: 'XNO',
+    scheme: 'exact',
+    decimals: 30,
+    label: 'Nano (XNO)',
+  },
+
   // ── Lightning ──────────────────────────────────────────────────
   lightning: {
     network: 'lightning',
@@ -175,6 +187,14 @@ export function convertUsdToAssetAmount(amountUsd, methodKey, rates = {}) {
   if (!rate) throw new Error(`No exchange rate for ${method.asset}`);
 
   const assetAmount = amountUsd / rate;
+
+  if (method.network === 'nano') {
+    // 30 decimals is past float64's exact range, and String() of a number that
+    // large is exponent notation ("1e+27"), which no verifier parses. Quote to
+    // the nearest 10^-9 XNO and scale the rest in BigInt.
+    return (BigInt(Math.round(assetAmount * 1e9)) * 10n ** 21n).toString();
+  }
+
   const smallest = Math.round(assetAmount * Math.pow(10, method.decimals));
   return String(smallest);
 }
@@ -288,6 +308,8 @@ export function buildPaymentRequired(options) {
       addr = payTo;
     }
     if (!addr) continue; // skip methods where merchant has no address
+    // A single non-Nano address must not be advertised as a Nano payee.
+    if (method.network === 'nano' && !/^(nano|xrb)_/.test(addr)) continue;
 
     // Convert USD to asset amount
     let assetAmount;
@@ -329,6 +351,7 @@ function _networkToMethodKey(network) {
     polygon: 'pol',
     solana: 'sol',
     bitcoin: 'btc',
+    nano: 'xno',
     lightning: 'lightning',
     stripe: 'stripe',
   };

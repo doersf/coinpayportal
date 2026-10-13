@@ -24,6 +24,8 @@ export const SCHEMES_BY_NETWORK: Record<string, Set<string>> = {
   bitcoin: new Set(['exact']),
   'bitcoin-cash': new Set(['exact']),
   solana: new Set(['exact']),
+  // Payer publishes a send block to the merchant; the proof is its hash.
+  nano: new Set(['exact']),
 };
 
 /** EVM networks — verified by EIP-712 signature, settled on-chain. */

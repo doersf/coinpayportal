@@ -20,6 +20,8 @@
  * Casing is therefore a per-network property, not a global one.
  */
 
+import { normalizeNanoAddress } from './nano';
+
 /** Networks whose addresses are case-insensitive and normalise to lowercase. */
 const CASE_INSENSITIVE_NETWORKS = new Set(['ethereum', 'polygon', 'base']);
 
@@ -36,6 +38,10 @@ export function normalizeAddressForNetwork(
 ): string {
   const value = (address ?? '').trim();
   if (!value) return '';
+
+  // Nano: one alphabet, all lowercase, and `xrb_` is the legacy spelling of
+  // the same account as `nano_`.
+  if ((network ?? '').toLowerCase() === 'nano') return normalizeNanoAddress(value);
 
   return CASE_INSENSITIVE_NETWORKS.has((network ?? '').toLowerCase())
     ? value.toLowerCase()

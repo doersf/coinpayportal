@@ -326,6 +326,38 @@ Log into CoinPayPortal and navigate to the **x402** section to:
 | **Solana** (SOL, USDC) | Transaction signature | Confirm finality via RPC |
 | **Lightning** | SHA256(preimage) === paymentHash | Instant (preimage = proof) |
 | **Stripe** | Payment intent status check | Capture payment intent |
+| **Nano** (XNO) | Confirmed send block via node `block_info` | Re-check the same block |
+
+### Nano (XNO)
+
+Nano is opt-in. Set `NANO_RPC_URL` to a Nano node you trust (there is no
+public default; unset means every Nano proof is refused), give the middleware a
+Nano payee and a way to price in XNO:
+
+```javascript
+const x402 = createX402Middleware({
+  apiKey: process.env.COINPAY_API_KEY,
+  payTo: { ethereum: '0x...', nano: 'nano_1...' },
+  rates: { ETH: 3500, XNO: 0.8 }, // you supply the XNO rate, as for BTC/ETH
+});
+```
+
+The buyer publishes a send block from their own wallet to `payTo` and presents
+its hash. Amounts are in raw (1 XNO = 10^30 raw), as integer strings:
+
+```json
+{ "x402Version": 1, "scheme": "exact", "network": "nano",
+  "payload": { "network": "nano", "scheme": "exact", "to": "nano_1...",
+    "amount": "1250000000000000000000000000000", "blockHash": "<64 hex>",
+    "resource": "https://api.example.com/premium" } }
+```
+
+`/verify` accepts the proof only if the node reports that block as a
+**confirmed send** to `expected.payTo` of at least `expected.amount` raw. A
+receive block, an unconfirmed block, a different destination, an underpayment
+or an unreachable node is a refusal. The block hash is the replay key, so one
+block unlocks one request. `/settle` repeats the check; nothing is broadcast
+and no key is held — the money is already in the merchant's account.
 
 ## Comparison: x402 vs Traditional Checkout
 
@@ -352,6 +384,7 @@ Log into CoinPayPortal and navigate to the **x402** section to:
 | `usdc_base` | base | USDC | 6 | `0x8335...2913` |
 | `lightning` | lightning | BTC | 11 (millisats) | BOLT12 offers |
 | `stripe` | stripe | USD | 2 (cents) | Card via Stripe |
+| `xno` | nano | XNO | 30 (raw) | Send block; needs `NANO_RPC_URL` |
 
 ## Security Considerations
 

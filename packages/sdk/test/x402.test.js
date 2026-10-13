@@ -251,6 +251,37 @@ describe('x402 Module', () => {
     });
   });
 
+  describe('Nano (xno)', () => {
+    const NANO_PAYEE = 'nano_13r91w5ig3r91w5ig3r91w5ig3r91w5ig3r91w5ig3r91w5ig3r96fwyt1ed';
+
+    it('is an exact-scheme method on the nano network, 30 decimals', () => {
+      expect(PAYMENT_METHODS.xno).toMatchObject({ network: 'nano', asset: 'XNO', scheme: 'exact', decimals: 30 });
+    });
+
+    it('quotes USD in raw as an exact integer string, never exponent notation', () => {
+      // $1 at $0.80/XNO = 1.25 XNO = 1.25e30 raw.
+      expect(convertUsdToAssetAmount(1, 'xno', { XNO: 0.8 })).toBe('1250000000000000000000000000000');
+      expect(() => convertUsdToAssetAmount(1, 'xno', {})).toThrow('No exchange rate for XNO');
+    });
+
+    it('is advertised when payTo names a Nano address and an XNO rate is given', () => {
+      const result = buildPaymentRequired({
+        payTo: { ethereum: '0xETH_ADDR', nano: NANO_PAYEE },
+        amountUsd: 1,
+        rates: { XNO: 0.8 },
+      });
+      const nano = result.accepts.find((e) => e.network === 'nano');
+      expect(nano.payTo).toBe(NANO_PAYEE);
+      expect(nano.asset).toBe('XNO');
+      expect(nano.extra.methodKey).toBe('xno');
+    });
+
+    it('is not advertised against a single non-Nano address, even with a raw amount', () => {
+      const result = buildPaymentRequired({ payTo: '0xABC', amount: '1000' });
+      expect(result.accepts.some((e) => e.network === 'nano')).toBe(false);
+    });
+  });
+
   describe('createX402Middleware', () => {
     it('should throw if apiKey is missing', () => {
       expect(() => createX402Middleware({ payTo: '0xABC' })).toThrow('apiKey');

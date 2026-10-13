@@ -590,3 +590,114 @@ describe('POST /api/x402/settle — payee matching on case-sensitive chains', ()
     expect(data.commission.collected).toBe(false);
   });
 });
+
+describe('POST /api/x402/settle — Nano', () => {
+  const MERCHANT = 'nano_13r91w5ig3r91w5ig3r91w5ig3r91w5ig3r91w5ig3r91w5ig3r96fwyt1ed';
+  const OTHER = 'nano_14rd3e7ip4rd3e7ip4rd3e7ip4rd3e7ip4rd3e7ip4rd3e7ip4rd359hqeg9';
+  const HASH = 'c'.repeat(64);
+  const PRICE = '1000000000000000000000000000';
+
+  function verifiedRow(overrides: Record<string, unknown> = {}) {
+    return {
+      data: {
+        id: 'p1',
+        status: 'verified',
+        amount: PRICE,
+        network: 'nano',
+        to_address: MERCHANT,
+        asset: null,
+        ...overrides,
+      },
+      error: null,
+    };
+  }
+
+  function nodeAnswers(block: Record<string, unknown>) {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => block });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  const confirmedSend = (linkAs = MERCHANT, amount = PRICE) => ({
+    amount,
+    confirmed: 'true',
+    subtype: 'send',
+    contents: { type: 'state', link_as_account: linkAs },
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSingle.mockReset();
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co';
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-key';
+    process.env.NANO_RPC_URL = 'https://nano-node.test/rpc';
+    mockResolveScopedKey.mockResolvedValue({
+      keyId: 'key1',
+      business: { id: 'biz1', merchant_id: 'm1', name: 'Biz', active: true },
+      scopes: ['payments:create'],
+    });
+    setClaimResult({ data: [{ id: 'p1' }], error: null });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('settles a confirmed send to the stored payee, looked up by block hash', async () => {
+    mockSingle.mockResolvedValueOnce(verifiedRow());
+    nodeAnswers(confirmedSend());
+
+    const res = await POST(
+      makeRequest({ payment: { payload: { network: 'nano', scheme: 'exact', blockHash: HASH, nonce: 'ignored' } } }),
+    );
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.settled).toBe(true);
+    expect(data.txHash).toBe(HASH.toUpperCase());
+    expect(mockEq).toHaveBeenCalledWith('unique_key', HASH.toUpperCase());
+  });
+
+  it('refuses a block that paid someone else', async () => {
+    mockSingle.mockResolvedValueOnce(verifiedRow());
+    nodeAnswers(confirmedSend(OTHER));
+
+    const res = await POST(
+      makeRequest({ payment: { payload: { network: 'nano', scheme: 'exact', blockHash: HASH } } }),
+    );
+
+    expect(res.status).toBe(500);
+    expect((await res.json()).details).toContain(`not ${MERCHANT}`);
+  });
+
+  it('refuses a block for less than the recorded amount', async () => {
+    mockSingle.mockResolvedValueOnce(verifiedRow());
+    nodeAnswers(confirmedSend(MERCHANT, '1'));
+
+    const res = await POST(
+      makeRequest({ payment: { payload: { network: 'nano', scheme: 'exact', blockHash: HASH } } }),
+    );
+
+    expect(res.status).toBe(500);
+    expect((await res.json()).details).toMatch(/^Underpayment/);
+  });
+
+  it('refuses a second settlement of the same block', async () => {
+    mockSingle.mockResolvedValueOnce(verifiedRow({ status: 'settled', tx_hash: HASH.toUpperCase() }));
+
+    const res = await POST(
+      makeRequest({ payment: { payload: { network: 'nano', scheme: 'exact', blockHash: HASH } } }),
+    );
+
+    expect(res.status).toBe(409);
+  });
+
+  it('refuses a missing or malformed hash before looking anything up', async () => {
+    const res = await POST(
+      makeRequest({ payment: { payload: { network: 'nano', scheme: 'exact', blockHash: 'nope' } } }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(mockSingle).not.toHaveBeenCalled();
+  });
+});

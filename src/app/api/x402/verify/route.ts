@@ -6,6 +6,7 @@
  *   - EVM chains (ETH, POL, USDC on ETH/Polygon/Base) via EIP-712 signatures
  *   - Bitcoin/Bitcoin Cash via transaction proof
  *   - Solana (SOL, USDC) via transaction signature
+ *   - Nano (XNO) via a confirmed send block, looked up on a Nano node
  *   - Lightning via BOLT12 preimage
  *   - Stripe via payment intent
  */
@@ -18,6 +19,7 @@ import { checkRateLimitAsync } from '@/lib/web-wallet/rate-limit';
 import { normalizeAddressForNetwork } from '@/lib/x402/address';
 import { isV2Payment, verifyExactEvmV2, type V2Payment } from '@/lib/x402/v2';
 import { EVM_NETWORKS, UTXO_NETWORKS, checkSchemeForNetwork } from '@/lib/x402/networks';
+import { normalizeNanoBlockHash, verifyNanoBlock } from '@/lib/x402/nano';
 import { createHash } from 'crypto';
 
 function getSupabase() {
@@ -153,6 +155,24 @@ async function verifySolanaPayment(payment: any) {
   // Verify via Solana RPC — the signature is checked during settlement.
   // Accept optimistically for low-latency response; settle confirms finality.
   return { valid: true, pendingConfirmation: true };
+}
+
+/**
+ * Verify a Nano (XNO) payment.
+ *
+ * Unlike the UTXO and Solana paths this is not optimistic: Nano confirms in
+ * about a second, so the node is asked now. The block must be a confirmed send
+ * to the merchant's `expected.payTo` for at least `expected.amount` raw — the
+ * figures the merchant states, not the ones in the payer's payload.
+ */
+async function verifyNanoPayment(payment: any, expected: { payTo?: unknown; amount?: unknown }) {
+  const result = await verifyNanoBlock({
+    blockHash: payment.payload.blockHash,
+    payTo: expected.payTo,
+    amountRaw: expected.amount,
+  });
+  if (!result.valid) return { valid: false, error: result.error };
+  return { valid: true };
 }
 
 /**
@@ -686,6 +706,8 @@ export async function POST(request: NextRequest) {
       result = await verifyUtxoPayment(payment);
     } else if (network === 'solana') {
       result = await verifySolanaPayment(payment);
+    } else if (network === 'nano') {
+      result = await verifyNanoPayment(payment, expected);
     } else {
       return NextResponse.json(
         { error: `Unsupported network: ${network}` },
@@ -699,12 +721,18 @@ export async function POST(request: NextRequest) {
 
     // Replay identity. Stripe proofs carry no nonce/txId/txSignature/preimage —
     // their unique identifier is the PaymentIntent id, so include it here.
+    //
+    // Nano's replay identity is the block hash alone, in canonical case. A
+    // payer-chosen `nonce` must not take precedence there, or one block could
+    // be redeemed once per nonce.
     const uniqueKey =
-      payment.payload.nonce ||
-      payment.payload.txId ||
-      payment.payload.txSignature ||
-      payment.payload.preimage ||
-      payment.payload.paymentIntentId;
+      network === 'nano'
+        ? normalizeNanoBlockHash(payment.payload.blockHash)
+        : payment.payload.nonce ||
+          payment.payload.txId ||
+          payment.payload.txSignature ||
+          payment.payload.preimage ||
+          payment.payload.paymentIntentId;
 
     if (!uniqueKey) {
       return NextResponse.json(

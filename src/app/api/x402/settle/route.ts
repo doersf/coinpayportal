@@ -26,6 +26,7 @@
  *   - Bitcoin: outputs to the payee sum to >= amount
  *   - Bitcoin Cash: refused — no verified lookup wired up
  *   - Solana: payee's lamport or SPL balance rose by >= amount
+ *   - Nano: block is a confirmed send of >= amount to the payee
  *   - Lightning: preimage proves payment (paid directly, nothing to check)
  *   - Stripe: capture the payment intent (Stripe handles splits)
  */
@@ -39,6 +40,7 @@ import { checkRateLimitAsync } from '@/lib/web-wallet/rate-limit';
 import { addressesEqual } from '@/lib/x402/address';
 import { evmChainId, isV2Payment } from '@/lib/x402/v2';
 import { EVM_NETWORKS, checkSchemeForNetwork } from '@/lib/x402/networks';
+import { normalizeNanoBlockHash, verifyNanoBlock } from '@/lib/x402/nano';
 import {
   authoriseAgentSpend,
   recordAgentSpend,
@@ -436,11 +438,22 @@ export async function POST(request: NextRequest) {
     }
     const uniqueKey = isV2
       ? payment.payload.authorization?.nonce
-      : payment.payload.nonce ||
-        payment.payload.txId ||
-        payment.payload.txSignature ||
-        payment.payload.preimage ||
-        payment.payload.paymentIntentId;
+      : network === 'nano'
+        ? normalizeNanoBlockHash(payment.payload.blockHash)
+        : payment.payload.nonce ||
+          payment.payload.txId ||
+          payment.payload.txSignature ||
+          payment.payload.preimage ||
+          payment.payload.paymentIntentId;
+
+    // Without a hash the lookup below would fall back to "any verified Nano
+    // payment for this business" and could claim someone else's.
+    if (network === 'nano' && !uniqueKey) {
+      return NextResponse.json(
+        { error: 'Missing or malformed blockHash for Nano settlement' },
+        { status: 400 }
+      );
+    }
 
     // Find the verified payment record
     const query = supabase
@@ -630,6 +643,16 @@ export async function POST(request: NextRequest) {
         const txSig = payment.payload.txSignature;
         if (!txSig) throw new Error('Missing txSignature for Solana settlement');
         result = await verifySolanaTx(txSig, expectedTo, expectedAmount);
+      } else if (network === 'nano') {
+        // Nano: re-check the block against the recorded payee and amount.
+        // The payer already published it; there is nothing to broadcast.
+        const checked = await verifyNanoBlock({
+          blockHash: uniqueKey,
+          payTo: expectedTo,
+          amountRaw: expectedAmount.toString(),
+        });
+        if (!checked.valid) throw new Error(checked.error);
+        result = { txHash: checked.blockHash, confirmed: true };
       } else {
         await releaseSettleClaim();
         return NextResponse.json(
