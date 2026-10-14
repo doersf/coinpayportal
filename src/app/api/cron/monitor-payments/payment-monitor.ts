@@ -270,7 +270,8 @@ export async function rescanLateDeposits(
       expires_at,
       forward_tx_hash,
       updated_at,
-      merchant_wallet_address
+      merchant_wallet_address,
+      metadata
     `)
     .in('status', STUCK_STATUSES)
     .not('payment_address', 'is', null)
@@ -301,6 +302,14 @@ export async function rescanLateDeposits(
       console.log(
         `Payment ${payment.id} is stuck in '${payment.status}' with ${balance} ${payment.blockchain} still at ${payment.payment_address}; re-driving it`,
       );
+      // Deferred for lack of relayer gas: already confirmed and already
+      // announced, so only the forward is retried. Re-confirming would resend
+      // payment.confirmed to the merchant on every cycle until the float is
+      // topped up.
+      if (payment.status === 'confirmed' && (payment as { metadata?: Record<string, unknown> | null }).metadata?.forwarding_deferred) {
+        await triggerForwarding(supabase, payment.id);
+        continue;
+      }
       if (await confirmAndForwardPayment(supabase, payment as Payment, balance, now)) {
         stats.confirmed++;
       }

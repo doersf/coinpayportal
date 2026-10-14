@@ -54,6 +54,41 @@ export const ERC20_ABI = [
   'function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)',
 ];
 
+/**
+ * The relayer cannot cover the gas for a forward.
+ *
+ * Both checks that raise this run before the relayer signs anything, so the
+ * error itself is proof that this call broadcast nothing. Callers that know no
+ * *earlier* step broadcast either can treat the payment as untouched and put it
+ * back on the retry path, instead of freezing it for manual reconciliation —
+ * which is what happened to every token payment that confirmed while the float
+ * was empty (2026-09-24 on Ethereum, 2026-10-13 on Polygon).
+ */
+export class RelayerUnderfundedError extends Error {
+  readonly relayerAddress: string;
+  readonly cryptocurrency: SystemBlockchain;
+  readonly balanceWei: bigint;
+  readonly neededWei: bigint;
+
+  constructor(params: {
+    relayerAddress: string;
+    cryptocurrency: SystemBlockchain;
+    balanceWei: bigint;
+    neededWei: bigint;
+    purpose: string;
+  }) {
+    super(
+      `Gas relayer ${params.relayerAddress} has ${ethers.formatEther(params.balanceWei)} but needs ` +
+        `~${ethers.formatEther(params.neededWei)} ${params.purpose}. Top up the relayer.`,
+    );
+    this.name = 'RelayerUnderfundedError';
+    this.relayerAddress = params.relayerAddress;
+    this.cryptocurrency = params.cryptocurrency;
+    this.balanceWei = params.balanceWei;
+    this.neededWei = params.neededWei;
+  }
+}
+
 export interface GasRelayer {
   wallet: ethers.Wallet;
   address: string;
@@ -179,10 +214,13 @@ export async function forwardTokenViaRelayer(params: {
   const estimated =
     (PERMIT_GAS_LIMIT + TOKEN_TRANSFER_GAS_LIMIT * BigInt(recipients.length)) * gasPrice;
   if (relayer.balance < estimated) {
-    throw new Error(
-      `Gas relayer ${relayer.address} has ${ethers.formatEther(relayer.balance)} but needs ` +
-        `~${ethers.formatEther(estimated)} for ${cryptocurrency}. Top up the relayer.`,
-    );
+    throw new RelayerUnderfundedError({
+      relayerAddress: relayer.address,
+      cryptocurrency,
+      balanceWei: relayer.balance,
+      neededWei: estimated,
+      purpose: `for ${cryptocurrency}`,
+    });
   }
 
   const nonce: bigint = await token.nonces(owner.address);
@@ -261,11 +299,13 @@ export async function ensureGasForTransfers(params: {
   // The relayer needs the top-up *and* gas to send it.
   const sendCost = 21_000n * gasPrice;
   if (relayer.balance < shortfall + sendCost) {
-    throw new Error(
-      `Gas relayer ${relayer.address} has ${ethers.formatEther(relayer.balance)} but needs ` +
-        `~${ethers.formatEther(shortfall + sendCost)} to fund ${address} on ${cryptocurrency}. ` +
-        `Top up the relayer.`,
-    );
+    throw new RelayerUnderfundedError({
+      relayerAddress: relayer.address,
+      cryptocurrency,
+      balanceWei: relayer.balance,
+      neededWei: shortfall + sendCost,
+      purpose: `to fund ${address} on ${cryptocurrency}`,
+    });
   }
 
   const tx = await relayer.wallet.sendTransaction({ to: address, value: shortfall });

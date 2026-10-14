@@ -16,6 +16,7 @@ import { monitorEscrows } from './escrow-monitor';
 import { monitorLightningPayments, syncLnbitsPayments } from './lightning-monitor';
 import { monitorSeries } from './series-monitor';
 import { monitorEmails } from './email-monitor';
+import { checkRelayerFloats } from '@/lib/wallets/relayer-health';
 import { runInvoiceMonitorCycle, runInvoiceSchedulerCycle } from '@/lib/payments/monitor-invoices';
 import { expireEndedSubscriptions } from '@/lib/subscriptions/service';
 import { isCronSecret } from '@/lib/auth/secret-compare';
@@ -88,6 +89,13 @@ export async function GET(request: NextRequest) {
 
     // Send email notifications
     const emailStats = await monitorEmails(supabase, now);
+
+    // Warn before a gas relayer runs dry (throttled to once per half hour).
+    try {
+      await checkRelayerFloats(supabase, now);
+    } catch (relayerCheckError) {
+      console.error('Relayer float check failed:', relayerCheckError);
+    }
 
     // Monitor invoice payments
     const invoiceStats = await runInvoiceMonitorCycle(supabase, now);
