@@ -658,3 +658,76 @@ describe('fetchOnChainHistory - SOL', () => {
     });
   });
 });
+
+// ──────────────────────────────────────────────
+// EVM token history (USDC/USDT)
+// ──────────────────────────────────────────────
+
+describe('fetchOnChainHistory - EVM tokens', () => {
+  const WALLET = '0xCC3b072391AE7A8d10cF00DdC5F61DB2cA5541E5';
+  const savedEnv = { ...process.env };
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    process.env.POLYGON_RPC_URL = 'https://polygon.example/rpc';
+    process.env.ETHERSCAN_API_KEY = 'synthetic-explorer-key';
+    delete process.env.POLYGONSCAN_API_KEY;
+  });
+
+  afterEach(() => {
+    process.env = { ...savedEnv };
+  });
+
+  it('reads incoming USDC_POL from the explorer, with no block window', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status: '1',
+        message: 'OK',
+        result: [{
+          hash: '0xe75b3666',
+          from: '0xd2855f1440d9ededb0a084d6ba2415ae72f96e2b',
+          to: WALLET.toLowerCase(),
+          value: '14852971',
+          timeStamp: '1792044141',
+          blockNumber: '95501614',
+          confirmations: '413',
+        }],
+      }),
+    });
+
+    const txs = await fetchOnChainHistory(WALLET, 'USDC_POL');
+
+    const url = String(mockFetch.mock.calls[0][0]);
+    expect(url).toContain('chainid=137');
+    expect(url).toContain('action=tokentx');
+    expect(url).toContain('contractaddress=0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359');
+    expect(mockFetch).toHaveBeenCalledTimes(1); // no eth_getLogs
+    expect(txs).toEqual([expect.objectContaining({
+      txHash: '0xe75b3666', chain: 'USDC_POL', direction: 'incoming', amount: '14.852971',
+      status: 'confirmed', blockNumber: 95501614,
+    })]);
+  });
+
+  it('treats an explorer "No transactions found" as an empty history', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: '0', message: 'No transactions found', result: [] }),
+    });
+    expect(await fetchOnChainHistory(WALLET, 'USDT_POL')).toEqual([]);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports an RPC that refuses eth_getLogs instead of returning an empty history', async () => {
+    delete process.env.ETHERSCAN_API_KEY; // no explorer -> RPC fallback
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ result: '0x5b13c4b' }) })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: { message: 'ranges over 10000 blocks are not supported on free plan' } }),
+      });
+
+    await expect(fetchOnChainHistory(WALLET, 'USDC_POL')).rejects.toThrow(/eth_getLogs failed/);
+  });
+});
