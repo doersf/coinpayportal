@@ -17,3 +17,7 @@ CREATE TABLE IF NOT EXISTS public.ops_alerts (
 
 ALTER TABLE public.ops_alerts ENABLE ROW LEVEL SECURITY;
 -- No policies: only the service role (cron, monitor) reads or writes it.
+
+-- Self-hosted Postgres does not grant new tables to service_role by default;
+-- without this every alert write fails with "permission denied for table ops_alerts".
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.ops_alerts TO service_role;
