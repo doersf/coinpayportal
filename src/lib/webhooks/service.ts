@@ -90,6 +90,9 @@ export type WebhookEvent =
   | 'payment.forwarded'
   | 'payment.expired'
   | 'payment.failed'
+  // A PayPal buyer opened or advanced a dispute on this payment / it was decided.
+  | 'payment.disputed'
+  | 'payment.dispute_resolved'
   | 'escrow.created'
   | 'escrow.funded'
   | 'escrow.released'

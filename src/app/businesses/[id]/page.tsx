@@ -16,6 +16,7 @@ import { StripePayoutsTab } from '@/components/business/StripePayoutsTab';
 import { StripeApiKeysTab } from '@/components/business/StripeApiKeysTab';
 import { PayPalConnectTab } from '@/components/business/PayPalConnectTab';
 import { PayPalTransactionsTab } from '@/components/business/PayPalTransactionsTab';
+import { PayPalDisputesTab } from '@/components/business/PayPalDisputesTab';
 import { ThirdPartyTab } from '@/components/business/ThirdPartyTab';
 import { CryptoTransactionsTab } from '@/components/business/CryptoTransactionsTab';
 import { CryptoEscrowsTab } from '@/components/business/CryptoEscrowsTab';
@@ -56,6 +57,7 @@ const PAYPAL_TABS: { id: TabType; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'paypal-connect', label: 'PayPal Connect' },
   { id: 'paypal-transactions', label: 'Transactions' },
+  { id: 'paypal-disputes', label: 'Disputes' },
   { id: 'members', label: 'Members' },
 ];
 
@@ -381,6 +383,9 @@ export default function BusinessDetailPage() {
 
             {activeTab === 'paypal-transactions' && (
               <PayPalTransactionsTab businessId={businessId} />
+            )}
+            {activeTab === 'paypal-disputes' && (
+              <PayPalDisputesTab businessId={businessId} />
             )}
 
             {activeTab === 'third-party' && (
