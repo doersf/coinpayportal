@@ -271,6 +271,7 @@ idempotent.
   invoice. Invoicing is owned separately, so this was left alone deliberately
   rather than changed underneath it; the fix is to swap those two call sites to
   `resolvePaypalContext()`.
+- **Partner application:** see [PAYPAL-PARTNER-APPLICATION.md](./PAYPAL-PARTNER-APPLICATION.md).
 - **No disputes surface.** The onboarding referral requests the seller-dispute
   scopes, but no dispute routes or dashboard panel exist yet. The Stripe rail
   has both.

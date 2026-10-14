@@ -51,6 +51,7 @@ export function paypalApiBase(environment: PaypalEnvironment): string {
  */
 export async function getPaypalAccessToken(creds: PaypalCredentials): Promise<string> {
   const basic = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString('base64');
+  const startedAt = Date.now();
   const res = await fetch(`${paypalApiBase(creds.environment)}/v1/oauth2/token`, {
     method: 'POST',
     headers: {
@@ -60,9 +61,10 @@ export async function getPaypalAccessToken(creds: PaypalCredentials): Promise<st
     body: 'grant_type=client_credentials',
   });
 
+  logPaypalCall('PayPal auth', 'POST', '/v1/oauth2/token', res, startedAt);
   if (!res.ok) {
     const detail = await safeErrorText(res);
-    throw new Error(`PayPal auth failed (${res.status})${detail ? `: ${detail}` : ''}`);
+    throw new Error(withDebugId(`PayPal auth failed (${res.status})${detail ? `: ${detail}` : ''}`, res));
   }
 
   const data = (await res.json()) as { access_token?: string };
@@ -120,15 +122,17 @@ async function paypalRequest<T>(
   init: { method: string; body?: unknown; context?: PaypalCallContext; label: string }
 ): Promise<T> {
   const token = await getPaypalAccessToken(creds);
+  const startedAt = Date.now();
   const res = await fetch(`${paypalApiBase(creds.environment)}${path}`, {
     method: init.method,
     headers: buildHeaders(token, creds, init.context),
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   });
+  logPaypalCall(init.label, init.method, path, res, startedAt);
 
   if (!res.ok) {
     const detail = await safeErrorText(res);
-    throw new Error(`${init.label} failed (${res.status})${detail ? `: ${detail}` : ''}`);
+    throw new Error(withDebugId(`${init.label} failed (${res.status})${detail ? `: ${detail}` : ''}`, res));
   }
 
   // 204 No Content is a success with nothing to parse.
@@ -165,6 +169,44 @@ export interface CreateOrderParams extends PaypalCredentials, PaypalCallContext 
   platformFee?: string | number | null;
   /** Partner mode only: who collects the platform fee (the partner's own id). */
   platformFeePayeeMerchantId?: string | null;
+  /**
+   * Line items shown on the PayPal review page and in the payer's history.
+   * PayPal's partner review expects them; when omitted, one item is built from
+   * the description so every order carries at least one.
+   */
+  items?: PaypalOrderItem[];
+}
+
+export interface PaypalOrderItem {
+  name: string;
+  quantity: number;
+  /** Per-unit price in the order currency. */
+  unitAmount: string | number;
+  sku?: string;
+  description?: string;
+}
+
+/** Items plus the breakdown PayPal requires them to sum to, or null if they don't. */
+function buildOrderItems(
+  items: PaypalOrderItem[],
+  currencyCode: string,
+  total: string
+): { items: Record<string, unknown>[]; itemTotal: string } | null {
+  const built = items.map((item) => ({
+    name: item.name.slice(0, 127),
+    quantity: String(Math.max(1, Math.round(item.quantity))),
+    unit_amount: { currency_code: currencyCode, value: Number(item.unitAmount).toFixed(2) },
+    ...(item.sku ? { sku: item.sku.slice(0, 127) } : {}),
+    ...(item.description ? { description: item.description.slice(0, 127) } : {}),
+  }));
+  const cents = built.reduce(
+    (sum, item) => sum + Math.round(Number(item.unit_amount.value) * 100) * Number(item.quantity),
+    0
+  );
+  const itemTotal = (cents / 100).toFixed(2);
+  // PayPal rejects an order whose items don't add up to the amount
+  // (ITEM_TOTAL_MISMATCH). Better to send none than to fail the checkout.
+  return itemTotal === total ? { items: built, itemTotal } : null;
 }
 
 export interface PaypalOrder {
@@ -186,6 +228,21 @@ export async function createPaypalOrder(params: CreateOrderParams): Promise<Payp
       value,
     },
   };
+  const lineItems = buildOrderItems(
+    params.items?.length
+      ? params.items
+      : [{ name: params.description?.trim() || params.referenceId || 'Payment', quantity: 1, unitAmount: value }],
+    currencyCode,
+    value
+  );
+  if (lineItems) {
+    purchaseUnit.items = lineItems.items;
+    purchaseUnit.amount = {
+      currency_code: currencyCode,
+      value,
+      breakdown: { item_total: { currency_code: currencyCode, value: lineItems.itemTotal } },
+    };
+  }
   if (params.customId) purchaseUnit.custom_id = params.customId.slice(0, 127);
   if (params.invoiceId) purchaseUnit.invoice_id = params.invoiceId.slice(0, 127);
   if (params.payeeMerchantId) purchaseUnit.payee = { merchant_id: params.payeeMerchantId };
@@ -215,20 +272,25 @@ export async function createPaypalOrder(params: CreateOrderParams): Promise<Payp
     };
   }
 
-  const body: Record<string, unknown> = {
-    intent: 'CAPTURE',
-    purchase_units: [purchaseUnit],
-    application_context: {
-      brand_name: params.brandName || 'CoinPay',
+  // payment_source.paypal.experience_context replaces the deprecated
+  // application_context; PayPal then returns a `payer-action` link, which the
+  // approve-link lookup below already accepts.
+  const paypalSource: Record<string, unknown> = {
+    experience_context: {
+      brand_name: (params.brandName || 'CoinPay').slice(0, 127),
       user_action: 'PAY_NOW',
       shipping_preference: 'NO_SHIPPING',
       return_url: params.returnUrl,
       cancel_url: params.cancelUrl,
     },
   };
-  if (params.payerEmail) {
-    body.payer = { email_address: params.payerEmail };
-  }
+  if (params.payerEmail) paypalSource.email_address = params.payerEmail;
+
+  const body: Record<string, unknown> = {
+    intent: 'CAPTURE',
+    purchase_units: [purchaseUnit],
+    payment_source: { paypal: paypalSource },
+  };
 
   const data = await paypalRequest<{
     id: string;
@@ -441,6 +503,33 @@ export async function getPaypalBalances(params: BalanceParams): Promise<PaypalBa
     total: b?.total_balance?.value ?? '0.00',
     primary: !!b?.primary,
   }));
+}
+
+/**
+ * PayPal stamps every response with a PayPal-Debug-Id. Their support and the
+ * partner integration review both ask for it, so every call logs one line with
+ * it (no bodies, no credentials) and every error message carries it.
+ */
+function paypalDebugId(res: Response): string | null {
+  return res.headers?.get?.('paypal-debug-id') ?? null;
+}
+
+function logPaypalCall(label: string, method: string, path: string, res: Response, startedAt: number): void {
+  console.log(
+    JSON.stringify({
+      paypal_api: label,
+      method,
+      path,
+      status: res.status,
+      debug_id: paypalDebugId(res),
+      ms: Date.now() - startedAt,
+    })
+  );
+}
+
+function withDebugId(message: string, res: Response): string {
+  const debugId = paypalDebugId(res);
+  return debugId ? `${message} [PayPal-Debug-Id ${debugId}]` : message;
 }
 
 async function safeErrorText(res: Response): Promise<string> {

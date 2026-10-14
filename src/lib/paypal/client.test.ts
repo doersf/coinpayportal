@@ -86,6 +86,61 @@ describe('PayPal client HTTP calls', () => {
     expect(body.intent).toBe('CAPTURE');
   });
 
+  it('createPaypalOrder sends line items that sum to the amount, and experience_context', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ok({ access_token: 'tok' }))
+      .mockResolvedValueOnce(ok({ id: 'O-2', status: 'PAYER_ACTION_REQUIRED', links: [{ rel: 'payer-action', href: 'https://paypal/pa' }] }));
+
+    const order = await createPaypalOrder({
+      ...creds,
+      amount: 25,
+      currency: 'usd',
+      description: 'Landing page',
+      returnUrl: 'https://app/return',
+      cancelUrl: 'https://app/cancel',
+      payerEmail: 'buyer@example.com',
+    });
+
+    expect(order.approveUrl).toBe('https://paypal/pa');
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    const unit = body.purchase_units[0];
+    expect(unit.items).toEqual([{ name: 'Landing page', quantity: '1', unit_amount: { currency_code: 'USD', value: '25.00' } }]);
+    expect(unit.amount.breakdown.item_total.value).toBe('25.00');
+    expect(body.application_context).toBeUndefined();
+    expect(body.payment_source.paypal.experience_context.return_url).toBe('https://app/return');
+    expect(body.payment_source.paypal.email_address).toBe('buyer@example.com');
+  });
+
+  it('createPaypalOrder drops items that do not add up rather than fail the checkout', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ok({ access_token: 'tok' }))
+      .mockResolvedValueOnce(ok({ id: 'O-3', status: 'CREATED', links: [{ rel: 'approve', href: 'https://paypal/a' }] }));
+
+    await createPaypalOrder({
+      ...creds,
+      amount: 10,
+      currency: 'usd',
+      returnUrl: 'https://app/return',
+      cancelUrl: 'https://app/cancel',
+      items: [{ name: 'A', quantity: 2, unitAmount: 3 }],
+    });
+
+    const unit = JSON.parse(fetchMock.mock.calls[1][1].body).purchase_units[0];
+    expect(unit.items).toBeUndefined();
+    expect(unit.amount).toEqual({ currency_code: 'USD', value: '10.00' });
+  });
+
+  it('puts the PayPal-Debug-Id in error messages', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      headers: new Headers({ 'paypal-debug-id': 'f00dbabe1234' }),
+      json: async () => ({ error_description: 'Client Authentication failed' }),
+    } as unknown as Response);
+
+    await expect(getPaypalAccessToken(creds)).rejects.toThrow(/PayPal-Debug-Id f00dbabe1234/);
+  });
+
   it('capturePaypalOrder extracts capture details', async () => {
     fetchMock
       .mockResolvedValueOnce(ok({ access_token: 'tok' }))
