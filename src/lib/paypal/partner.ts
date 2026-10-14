@@ -156,16 +156,27 @@ export async function getMerchantIntegration(
 ): Promise<MerchantIntegration | null> {
   const { config } = params;
   const token = await getPaypalAccessToken(credsFrom(config));
-
-  const url =
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const base =
     `${paypalApiBase(config.environment)}/v1/customer/partners/` +
-    `${encodeURIComponent(config.partnerMerchantId)}/merchant-integrations/` +
-    `${encodeURIComponent(params.merchantIdOrTrackingId)}`;
+    `${encodeURIComponent(config.partnerMerchantId)}/merchant-integrations`;
 
-  const res = await fetch(url, {
+  // PayPal only resolves a tracking id through the query form, which answers
+  // with the merchant id; the path form takes a merchant id and 404s on a
+  // tracking id. We pass our business id as the tracking id, so try the query
+  // first and fall back to treating the value as a merchant id. (Found in the
+  // 2026-10-14 sandbox run: the path-only lookup never saw a merchant onboard.)
+  let merchantId = params.merchantIdOrTrackingId;
+  const byTracking = await fetch(`${base}?tracking_id=${encodeURIComponent(params.merchantIdOrTrackingId)}`, {
     method: 'GET',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers,
   });
+  if (byTracking.ok) {
+    const found = (await byTracking.json()) as { merchant_id?: string };
+    if (found?.merchant_id) merchantId = found.merchant_id;
+  }
+
+  const res = await fetch(`${base}/${encodeURIComponent(merchantId)}`, { method: 'GET', headers });
 
   if (res.status === 404) {
     return null;
@@ -189,9 +200,13 @@ export async function getMerchantIntegration(
     }
   }
 
-  const ppcp = (Array.isArray(data?.products) ? data.products : []).find(
-    (p: any) => p?.name === 'PPCP'
-  );
+  // PayPal names the products PPCP_CUSTOM / PPCP_STANDARD (plain "PPCP" on
+  // older accounts); prefer the custom (advanced) one when both are present.
+  const products: any[] = Array.isArray(data?.products) ? data.products : [];
+  const ppcp =
+    products.find((p) => p?.name === 'PPCP_CUSTOM') ??
+    products.find((p) => p?.name === 'PPCP_STANDARD') ??
+    products.find((p) => typeof p?.name === 'string' && p.name.startsWith('PPCP'));
 
   return {
     merchantIdInPaypal: data?.merchant_id ?? null,

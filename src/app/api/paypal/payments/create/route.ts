@@ -178,6 +178,14 @@ export async function POST(request: NextRequest) {
       `INV-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://coinpayportal.com';
+    const merchantSuccessUrl =
+      typeof (successUrl ?? success_url) === 'string' && (successUrl ?? success_url)
+        ? String(successUrl ?? success_url)
+        : null;
+    const merchantCancelUrl =
+      typeof (cancelUrl ?? cancel_url) === 'string' && (cancelUrl ?? cancel_url)
+        ? String(cancelUrl ?? cancel_url)
+        : null;
 
     // The row is written BEFORE the order so its id can travel to PayPal as
     // custom_id. That id is what the webhook uses to find this row without
@@ -206,6 +214,9 @@ export async function POST(request: NextRequest) {
           merchant_id: business.merchant_id,
           fraud_score: screening.score,
           fraud_decision: screening.decision,
+          // Where the hosted button page sends the payer after capture/cancel.
+          ...(merchantSuccessUrl ? { paypal_success_url: merchantSuccessUrl } : {}),
+          ...(merchantCancelUrl ? { paypal_cancel_url: merchantCancelUrl } : {}),
         },
       })
       .select('id')
@@ -232,12 +243,9 @@ export async function POST(request: NextRequest) {
         customId: inserted.id,
         invoiceId: invoiceNumber,
         payerEmail: customerEmailValue,
-        returnUrl:
-          (typeof (successUrl ?? success_url) === 'string' && (successUrl ?? success_url)) ||
-          `${appUrl}/pay/paypal/return?transaction_id=${inserted.id}`,
+        returnUrl: merchantSuccessUrl || `${appUrl}/pay/paypal/return?transaction_id=${inserted.id}`,
         cancelUrl:
-          (typeof (cancelUrl ?? cancel_url) === 'string' && (cancelUrl ?? cancel_url)) ||
-          `${appUrl}/pay/paypal/return?cancelled=1&transaction_id=${inserted.id}`,
+          merchantCancelUrl || `${appUrl}/pay/paypal/return?cancelled=1&transaction_id=${inserted.id}`,
         payeeMerchantId: context.payeeMerchantId,
         platformFee: platformFeeAmount > 0 ? platformFeeAmount : null,
         platformFeePayeeMerchantId: context.platformFeePayeeMerchantId,
@@ -278,10 +286,13 @@ export async function POST(request: NextRequest) {
       invoice_number: invoiceNumber,
       transaction_id: inserted.id,
       order_id: order.orderId,
-      // `checkout_url` is an alias of `approve_url` so an integration written
-      // against the Stripe rail reads the same field name on both.
+      // PayPal's redirect checkout, unchanged.
       approve_url: order.approveUrl,
-      checkout_url: order.approveUrl,
+      // CoinPay's hosted page with PayPal's JS SDK buttons (falls back to the
+      // redirect when the SDK can't load). `checkout_url` points here so an
+      // integration written against the Stripe rail reads the same field name.
+      hosted_checkout_url: `${appUrl}/pay/paypal/${inserted.id}`,
+      checkout_url: `${appUrl}/pay/paypal/${inserted.id}`,
       amount,
       currency: String(currency).toUpperCase(),
       platform_fee_amount: platformFeeAmount,

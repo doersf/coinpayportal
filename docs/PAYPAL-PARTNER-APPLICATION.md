@@ -23,7 +23,7 @@ This is the working checklist for getting approved. See
 | **PayPal-Debug-Id captured on every call** | Done — one JSON log line per call (`paypal_api`, `status`, `debug_id`, `ms`), and in every error |
 | **Line items + `item_total` breakdown on orders** | Done — one item from the description when the caller sends none |
 | **`payment_source.paypal.experience_context`** (replaces deprecated `application_context`) | Done |
-| JS SDK Smart Payment Buttons on the checkout page | **Not done** — checkout is a server-side redirect to PayPal |
+| JS SDK Smart Payment Buttons on the checkout page | Done — hosted `/pay/paypal/[id]` (API returns `hosted_checkout_url`), redirect kept as fallback |
 | Disputes surface (list / respond) | **Not done** — onboarding requests the scopes, no routes or UI yet |
 | Merchant can disconnect (consent revoked handling) | Done (webhook marks the account disconnected) |
 
@@ -57,7 +57,7 @@ This is the working checklist for getting approved. See
 3. **Record the videos** PayPal asks for (the agent can script each flow):
    merchant onboarding, buyer checkout, capture, refund, and disconnect.
 
-### Agent can do once sandbox credentials exist
+### Agent can do once sandbox credentials exist — 4 done 2026-10-14 ([evidence](./paypal-evidence/2026-10-14-sandbox-run.md)), buttons done
 
 4. Run the evidence script against sandbox: onboard a sandbox merchant, two
    sales, one refund — collecting each call's `PayPal-Debug-Id` from the log

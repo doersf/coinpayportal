@@ -130,6 +130,17 @@ describe('PayPal client HTTP calls', () => {
     expect(unit.amount).toEqual({ currency_code: 'USD', value: '10.00' });
   });
 
+  it('asks for the full refund representation', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ok({ access_token: 'tok' }))
+      .mockResolvedValueOnce(ok({ id: 'R-1', status: 'COMPLETED', amount: { value: '10.00', currency_code: 'USD' } }));
+
+    const refund = await refundPaypalCapture({ ...creds, captureId: 'CAP-1' });
+
+    expect(fetchMock.mock.calls[1][1].headers.Prefer).toBe('return=representation');
+    expect(refund).toMatchObject({ refundId: 'R-1', amount: '10.00' });
+  });
+
   it('puts the PayPal-Debug-Id in error messages', async () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,

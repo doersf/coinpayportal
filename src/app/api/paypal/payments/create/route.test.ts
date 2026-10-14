@@ -112,7 +112,9 @@ describe('POST /api/paypal/payments/create', () => {
     // 50% revenue shortfall, so the tier has to reach the fee.
     expect(body.platform_fee_amount).toBe(1);
     expect(body.approve_url).toBe('https://paypal/approve');
-    expect(body.checkout_url).toBe('https://paypal/approve');
+    // checkout_url now opens CoinPay's hosted JS SDK button page for this row.
+    expect(body.hosted_checkout_url).toMatch(new RegExp(`/pay/paypal/${body.transaction_id}$`));
+    expect(body.checkout_url).toBe(body.hosted_checkout_url);
     expect(mockCreateOrder).toHaveBeenCalledWith(
       expect.objectContaining({
         amount: 100,
