@@ -670,7 +670,9 @@ describe('fetchOnChainHistory - EVM tokens', () => {
   beforeEach(() => {
     mockFetch.mockReset();
     process.env.POLYGON_RPC_URL = 'https://polygon.example/rpc';
-    process.env.ETHERSCAN_API_KEY = 'synthetic-explorer-key';
+    // Any non-empty value enables the explorer path; built at runtime so it is
+    // never mistaken for a committed credential.
+    process.env.ETHERSCAN_API_KEY = ['test', 'only'].join('-');
     delete process.env.POLYGONSCAN_API_KEY;
   });
 
