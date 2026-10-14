@@ -24,7 +24,7 @@ This is the working checklist for getting approved. See
 | **Line items + `item_total` breakdown on orders** | Done — one item from the description when the caller sends none |
 | **`payment_source.paypal.experience_context`** (replaces deprecated `application_context`) | Done |
 | JS SDK Smart Payment Buttons on the checkout page | Done — hosted `/pay/paypal/[id]` (API returns `hosted_checkout_url`), redirect kept as fallback |
-| Disputes surface (list / respond) | **Not done** — onboarding requests the scopes, no routes or UI yet |
+| Disputes surface (list / respond) | Done — Business → PayPal → Disputes: list, conversation, message buyer, evidence (incl. tracking), accept claim; `CUSTOMER.DISPUTE.*` webhooks forward `payment.disputed` / `payment.dispute_resolved` to the merchant |
 | Merchant can disconnect (consent revoked handling) | Done (webhook marks the account disconnected) |
 
 ## Status (2026-10-14)

@@ -272,9 +272,9 @@ idempotent.
   rather than changed underneath it; the fix is to swap those two call sites to
   `resolvePaypalContext()`.
 - **Partner application:** see [PAYPAL-PARTNER-APPLICATION.md](./PAYPAL-PARTNER-APPLICATION.md).
-- **No disputes surface.** The onboarding referral requests the seller-dispute
-  scopes, but no dispute routes or dashboard panel exist yet. The Stripe rail
-  has both.
+- **Disputes** are read live from PayPal (no local table): `GET /api/paypal/disputes`,
+  `GET /api/paypal/disputes/:id`, and `POST .../message | .../evidence` (`billing.manage`)
+  or `.../accept` (`funds.move`, it refunds the buyer).
 - **No 3-D Secure equivalent.** The fraud screen's `verify` decision forces 3DS
   on the Stripe rail. PayPal exposes no per-order step-up, so an elevated score
   is logged and allowed through rather than silently treated as stepped up.

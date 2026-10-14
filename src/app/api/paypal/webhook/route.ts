@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { handleDisputeEvent } from '@/lib/paypal/dispute-webhook';
 import { createClient } from '@supabase/supabase-js';
 import { verifyPaypalWebhookSignature, type PaypalCapture } from '@/lib/paypal/client';
 import { getPaypalPlatformConfig } from '@/lib/paypal/platform';
@@ -145,6 +146,11 @@ async function handleEvent(supabase: any, eventType: string, event: any): Promis
 
     case 'MERCHANT.PARTNER-CONSENT.REVOKED':
       return handleConsentRevoked(supabase, event);
+
+    case 'CUSTOMER.DISPUTE.CREATED':
+    case 'CUSTOMER.DISPUTE.UPDATED':
+    case 'CUSTOMER.DISPUTE.RESOLVED':
+      return handleDisputeEvent(supabase, eventType, event);
 
     default:
       // Unhandled events are still recorded on the ledger, which is how we find
@@ -363,3 +369,4 @@ async function handleConsentRevoked(supabase: any, event: any): Promise<string |
 
   return data?.business_id ?? null;
 }
+

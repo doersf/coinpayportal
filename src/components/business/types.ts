@@ -40,6 +40,7 @@ export type TabType =
   | 'stripe-api-keys'
   | 'paypal-connect'
   | 'paypal-transactions'
+  | 'paypal-disputes'
   | 'third-party'
   | 'crypto-transactions'
   | 'crypto-escrows'
