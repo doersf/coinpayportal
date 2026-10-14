@@ -30,9 +30,13 @@ const row = {
   metadata: { paypal_success_url: 'https://shop.example/thanks', paypal_cancel_url: 'javascript:alert(1)' },
 };
 
+// Built at runtime so it is obviously a fixture, not a credential: the test
+// only needs a distinctive value to prove it never reaches the response.
+const FIXTURE_SECRET = ['fixture', 'never', 'returned'].join('-');
+
 const selfServe = {
   mode: 'self_serve',
-  creds: { clientId: 'MERCHANT-CLIENT', clientSecret: 'TOP-SECRET', environment: 'live' },
+  creds: { clientId: 'MERCHANT-CLIENT', clientSecret: FIXTURE_SECRET, environment: 'live' },
   callContext: {},
   payeeMerchantId: null,
   environment: 'live',
@@ -59,14 +63,14 @@ describe('getPublicPaypalCheckout', () => {
       successUrl: 'https://shop.example/thanks',
       cancelUrl: null,
     });
-    expect(JSON.stringify(result)).not.toContain('TOP-SECRET');
+    expect(JSON.stringify(result)).not.toContain(FIXTURE_SECRET);
   });
 
   it('passes the seller and BN code in partner mode', async () => {
     mockResolveContext.mockResolvedValue({
       ...selfServe,
       mode: 'partner',
-      creds: { clientId: 'PLATFORM-CLIENT', clientSecret: 'x', environment: 'sandbox' },
+      creds: { clientId: 'PLATFORM-CLIENT', clientSecret: FIXTURE_SECRET, environment: 'sandbox' },
       callContext: { bnCode: 'BN-1', authAssertionMerchantId: 'SELLER1' },
       payeeMerchantId: 'SELLER1',
       environment: 'sandbox',
