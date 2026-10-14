@@ -233,7 +233,7 @@ export function paymentConfirmedTemplate(payment: Payment): EmailTemplate {
         </div>
         <div class="detail-row">
           <span class="detail-label">Crypto Amount:</span>
-          <span class="detail-value">${payment.customer_paid_amount ? formatCryptoAmount(payment.customer_paid_amount, payment.crypto_currency || payment.blockchain) : 'N/A'}</span>
+          <span class="detail-value">${(payment.customer_paid_amount ?? payment.crypto_amount) ? formatCryptoAmount((payment.customer_paid_amount ?? payment.crypto_amount)!, payment.crypto_currency || payment.blockchain) : 'N/A'}</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">Blockchain:</span>

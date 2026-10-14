@@ -38,7 +38,9 @@ import {
   computeGasReserve,
   ensureGasForTransfers,
   forwardTokenViaRelayer,
+  RelayerUnderfundedError,
 } from './evm-gas';
+import { alertRelayerUnderfunded } from './relayer-health';
 import { getCommissionWallet, type SystemBlockchain } from './system-wallet';
 import { checkBalance as checkAddressBalance } from '@/app/api/cron/monitor-payments/balance-checkers';
 
@@ -248,6 +250,24 @@ function toTokenUnits(amount: number, decimals: number): bigint {
   return BigInt(Math.round(amount * 10 ** decimals));
 }
 
+/**
+ * Forwarding stopped before anything was broadcast, so the payment is
+ * untouched and can safely go back to `confirmed` for a later retry.
+ *
+ * Only raised where that is certain. A relayer shortfall after the relayer path
+ * already failed for some other reason does not qualify: that path can fail
+ * after its permit or a transferFrom has landed.
+ */
+export class ForwardNotStartedError extends Error {
+  readonly shortfall: RelayerUnderfundedError;
+
+  constructor(shortfall: RelayerUnderfundedError) {
+    super(shortfall.message);
+    this.name = 'ForwardNotStartedError';
+    this.shortfall = shortfall;
+  }
+}
+
 async function forwardEVMTokenSplit(
   chain: BlockchainType,
   rpcUrl: string,
@@ -267,6 +287,7 @@ async function forwardEVMTokenSplit(
 
   // Preferred: the relayer pulls the funds with permit + transferFrom, so the
   // derived address never needs native currency and no dust is left behind.
+  let relayMayHaveBroadcast = false;
   try {
     const relayed = await forwardTokenViaRelayer({
       cryptocurrency: chain as SystemBlockchain,
@@ -289,19 +310,29 @@ async function forwardEVMTokenSplit(
   } catch (relayError) {
     // A broke relayer is an operational problem and the fallback needs the same
     // float, so there is nothing to gain by retrying the other path — surface it.
+    // The shortfall check runs before the relayer signs anything, so nothing
+    // has been broadcast yet.
+    if (relayError instanceof RelayerUnderfundedError) throw new ForwardNotStartedError(relayError);
     const msg = relayError instanceof Error ? relayError.message : String(relayError);
-    if (msg.includes('Top up the relayer')) throw relayError;
+    relayMayHaveBroadcast = true;
     console.error(`[SECURE] Relayer path failed for ${chain}, falling back to gas top-up: ${msg}`);
   }
 
   // Fallback for tokens without permit (USDT on Ethereum predates EIP-2612):
   // fund the address, then let it send for itself.
-  await ensureGasForTransfers({
-    cryptocurrency: chain as SystemBlockchain,
-    provider,
-    address: new ethers.Wallet(privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`).address,
-    transferCount: payouts.length,
-  });
+  try {
+    await ensureGasForTransfers({
+      cryptocurrency: chain as SystemBlockchain,
+      provider,
+      address: new ethers.Wallet(privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`).address,
+      transferCount: payouts.length,
+    });
+  } catch (gasError) {
+    if (gasError instanceof RelayerUnderfundedError && !relayMayHaveBroadcast) {
+      throw new ForwardNotStartedError(gasError);
+    }
+    throw gasError;
+  }
 
   const wallet = new ethers.Wallet(privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`, provider);
   const token = new ethers.Contract(config.contractAddress, ERC20_TRANSFER_ABI, wallet);
@@ -883,6 +914,47 @@ export async function forwardPaymentSecurely(
         platformFee,
       };
     } catch (txError) {
+      // An empty gas relayer stops the sweep before anything is signed. That
+      // is an operational shortfall, not an ambiguous broadcast: put the row
+      // back to `confirmed` so the late-deposit rescan retries it once the
+      // float is topped up, instead of freezing it for manual reconciliation
+      // where nothing will ever look at it again.
+      if (txError instanceof ForwardNotStartedError) {
+        const existing = (payment.metadata && typeof payment.metadata === 'object') ? payment.metadata : {};
+        const { error: releaseError } = await supabase
+          .from('payments')
+          .update({
+            status: 'confirmed',
+            metadata: {
+              ...existing,
+              forwarding_deferred: {
+                reason: 'relayer_underfunded',
+                relayer: txError.shortfall.relayerAddress,
+                chain: txError.shortfall.cryptocurrency,
+                balance_wei: txError.shortfall.balanceWei.toString(),
+                needed_wei: txError.shortfall.neededWei.toString(),
+                at: new Date().toISOString(),
+              },
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', paymentId)
+          .eq('status', 'forwarding');
+        if (releaseError) {
+          console.error(`[SECURE] Could not release relayer-starved claim for ${paymentId}:`, releaseError);
+        }
+        console.error(`[SECURE] Forwarding deferred for ${paymentId}: ${txError.message}`);
+        try {
+          await alertRelayerUnderfunded(supabase, txError.shortfall, paymentId);
+        } catch (alertError) {
+          console.error('[SECURE] Relayer alert failed:', alertError);
+        }
+        return {
+          success: false,
+          error: `Forwarding deferred until the gas relayer is topped up: ${txError.message}`,
+        };
+      }
+
       // Preserve the claim even when the provider or the final database write
       // fails. A stale balance or missing hash is not proof of no broadcast.
       const forwardingError = txError instanceof Error ? txError.message : String(txError);

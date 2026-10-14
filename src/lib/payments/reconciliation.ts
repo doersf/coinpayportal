@@ -19,7 +19,13 @@
  */
 
 /** The marks a failed forwarding attempt leaves behind. */
-const FAILURE_KEYS = ['reconciliation_required', 'forwarding_error', 'forwarding_failed_at'] as const;
+const FAILURE_KEYS = [
+  'reconciliation_required',
+  'forwarding_error',
+  'forwarding_failed_at',
+  // Set when a sweep was put back to `confirmed` because the gas relayer was empty.
+  'forwarding_deferred',
+] as const;
 
 export interface SettledMetadata {
   /** True when the row carried marks from an earlier failed attempt. */

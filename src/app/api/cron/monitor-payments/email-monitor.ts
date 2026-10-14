@@ -10,11 +10,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendEmail } from '@/lib/email';
 import { fetchAllKeyset } from '@/lib/db/keyset';
+import { paymentConfirmedTemplate } from '@/lib/email/templates';
+import type { Payment } from '@/lib/supabase/types';
 
 export interface EmailStats {
   reminders_sent: number;
   settlements_sent: number;
   status_change_sent: number;
+  deposits_sent: number;
   errors: number;
 }
 
@@ -41,7 +44,7 @@ export async function monitorEmails(
   supabase: SupabaseClient,
   now: Date
 ): Promise<EmailStats> {
-  const stats: EmailStats = { reminders_sent: 0, settlements_sent: 0, status_change_sent: 0, errors: 0 };
+  const stats: EmailStats = { reminders_sent: 0, settlements_sent: 0, status_change_sent: 0, deposits_sent: 0, errors: 0 };
 
   try {
     await sendExpirationReminders(supabase, now, stats);
@@ -64,7 +67,126 @@ export async function monitorEmails(
     stats.errors++;
   }
 
+  try {
+    await sendDepositNotifications(supabase, now, stats);
+  } catch (err) {
+    console.error('Deposit notification error:', err);
+    stats.errors++;
+  }
+
   return stats;
+}
+
+/**
+ * How far back a confirmation is still worth announcing. Bounds the first run
+ * after deploy, too: older payments are not emailed retroactively.
+ */
+const DEPOSIT_EMAIL_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Email the merchant when a payment to one of their businesses is received.
+ *
+ * Driven from `confirmed_at` rather than hooked into each confirm path: a
+ * payment is confirmed by the monitor loop, the late-deposit rescan, the
+ * merchant-facing balance check and the card/bank rails, and not all of them
+ * raise payment.confirmed. Whatever confirmed it, it shows up here once.
+ *
+ * Opt-out, on by default: `merchant_settings.email_notifications` (and the
+ * notifications master switch). A merchant with no settings row gets the email.
+ *
+ * Exactly once per payment: the `email_queue` row is inserted *before* sending,
+ * and a unique index on (payment_id, event_type) makes the insert the claim.
+ */
+export async function sendDepositNotifications(
+  supabase: SupabaseClient,
+  now: Date,
+  stats: EmailStats
+): Promise<void> {
+  const since = new Date(now.getTime() - DEPOSIT_EMAIL_LOOKBACK_MS).toISOString();
+  const { data: payments, error } = await supabase
+    .from('payments')
+    .select('id, business_id, amount, currency, blockchain, crypto_amount, crypto_currency, customer_paid_amount, tx_hash, confirmed_at, status')
+    .gte('confirmed_at', since)
+    .not('business_id', 'is', null)
+    .order('confirmed_at', { ascending: true })
+    .limit(200);
+  if (error) throw error;
+  if (!payments?.length) return;
+
+  const { data: already, error: sentError } = await supabase
+    .from('email_queue')
+    .select('payment_id')
+    .eq('event_type', 'payment.confirmed')
+    .in('payment_id', payments.map((p) => p.id));
+  if (sentError) throw sentError;
+  const done = new Set((already || []).map((r: { payment_id: string }) => r.payment_id));
+
+  for (const payment of payments) {
+    if (done.has(payment.id)) continue;
+    try {
+      const { data: business } = await supabase
+        .from('businesses')
+        .select('id, name, merchant_id')
+        .eq('id', payment.business_id)
+        .single();
+      if (!business?.merchant_id) continue;
+
+      const { data: merchant } = await supabase
+        .from('merchants')
+        .select('id, email')
+        .eq('id', business.merchant_id)
+        .single();
+      if (!merchant?.email) continue;
+
+      const { data: settings } = await supabase
+        .from('merchant_settings')
+        .select('notifications_enabled, email_notifications')
+        .eq('merchant_id', merchant.id)
+        .maybeSingle();
+      const optedOut = settings && (!settings.notifications_enabled || !settings.email_notifications);
+
+      const template = paymentConfirmedTemplate(payment as unknown as Payment);
+      const subject = `${template.subject} · ${business.name}`;
+
+      // The claim. A unique violation means another worker has it.
+      const { data: claimed, error: claimError } = await supabase
+        .from('email_queue')
+        .insert({
+          merchant_id: merchant.id,
+          payment_id: payment.id,
+          event_type: 'payment.confirmed',
+          recipient_email: merchant.email,
+          subject,
+          html_body: template.html,
+          status: optedOut ? 'failed' : 'pending',
+          error_message: optedOut ? 'merchant opted out of email notifications' : null,
+        })
+        .select('id');
+      if (claimError || !claimed?.length) continue;
+      if (optedOut) continue;
+
+      const result = await sendEmail({ to: merchant.email, from: FROM_EMAIL, subject, html: template.html });
+      await supabase
+        .from('email_queue')
+        .update(
+          result.success
+            ? { status: 'sent', sent_at: new Date().toISOString(), attempts: 1 }
+            : { status: 'failed', error_message: result.error || 'send failed', attempts: 1 }
+        )
+        .eq('id', claimed[0].id);
+
+      if (result.success) {
+        stats.deposits_sent++;
+        console.log(`Sent deposit email for payment ${payment.id} to merchant ${merchant.id}`);
+      } else {
+        stats.errors++;
+        console.error(`Deposit email for payment ${payment.id} failed:`, result.error);
+      }
+    } catch (err) {
+      console.error(`Deposit notification failed for payment ${payment.id}:`, err);
+      stats.errors++;
+    }
+  }
 }
 
 async function sendExpirationReminders(
