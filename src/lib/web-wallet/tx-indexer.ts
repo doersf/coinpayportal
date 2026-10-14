@@ -599,6 +599,107 @@ async function fetchEVMNativeHistory(
 }
 
 // ──────────────────────────────────────────────
+// EVM token history via the explorer (preferred)
+// ──────────────────────────────────────────────
+
+/**
+ * Chains whose token history the Etherscan V2 free tier serves. Base (8453)
+ * answers "Free API access is not supported for this chain".
+ */
+const TOKEN_EXPLORER_CHAIN_IDS: Partial<Record<WalletChain, number>> = {
+  USDC_ETH: 1,
+  USDT_ETH: 1,
+  USDC_POL: 137,
+  USDT_POL: 137,
+};
+
+/**
+ * ERC-20 history from the explorer's `tokentx` endpoint.
+ *
+ * The eth_getLogs path below only ever looked at the last 5,000 blocks (about
+ * three hours on Polygon), and our Polygon RPC (drpc free plan) refuses
+ * eth_getLogs outright — "ranges over 10000 blocks are not supported", at any
+ * range. Its 400 was read as "no transfers", so no incoming token deposit ever
+ * reached a wallet's history: a 14.85 USDC payout on 2026-10-14 showed in the
+ * balance but nowhere in the asset's history. The explorer has the full history
+ * for the address and needs no block range.
+ *
+ * Returns null — not [] — when the explorer cannot answer (no key, unsupported
+ * chain, API error), so the caller knows to fall back rather than report an
+ * empty history.
+ */
+async function fetchTokenViaExplorer(
+  address: string,
+  chain: WalletChain,
+  contractAddress: string,
+  decimals: number
+): Promise<IndexedTransaction[] | null> {
+  const chainId = TOKEN_EXPLORER_CHAIN_IDS[chain];
+  if (!chainId) return null;
+  const apiKey = (chainId === 137 && process.env.POLYGONSCAN_API_KEY) || process.env.ETHERSCAN_API_KEY;
+  if (!apiKey) return null;
+
+  const url =
+    `${ETHERSCAN_V2_BASE}?chainid=${chainId}&module=account&action=tokentx` +
+    `&contractaddress=${contractAddress}&address=${address}` +
+    `&page=1&offset=${MAX_TXS}&sort=desc&apikey=${apiKey}`;
+
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      console.warn(`[TxIndexer] ${chain} tokentx HTTP ${resp.status}; falling back to eth_getLogs`);
+      return null;
+    }
+    const data: {
+      status: string;
+      message: string;
+      result:
+        | string
+        | Array<{
+            hash: string;
+            from: string;
+            to: string;
+            value: string;
+            timeStamp: string;
+            blockNumber: string;
+            confirmations: string;
+          }>;
+    } = await resp.json();
+
+    if (!Array.isArray(data.result)) {
+      console.warn(`[TxIndexer] ${chain} tokentx: ${data.message} ${String(data.result).slice(0, 120)}`);
+      return null;
+    }
+    // status 0 with an empty array is "No transactions found", a real answer.
+
+    const addrLower = address.toLowerCase();
+    const results: IndexedTransaction[] = [];
+    for (const tx of data.result) {
+      const incoming = tx.to.toLowerCase() === addrLower;
+      if (!incoming && tx.from.toLowerCase() !== addrLower) continue;
+      const confirmations = parseInt(tx.confirmations || '0', 10);
+      results.push({
+        txHash: tx.hash,
+        chain,
+        direction: incoming ? 'incoming' : 'outgoing',
+        amount: formatWei(BigInt(tx.value || '0'), decimals),
+        fromAddress: tx.from,
+        toAddress: tx.to,
+        status: confirmations >= 12 ? 'confirmed' : 'pending',
+        confirmations,
+        timestamp: new Date(parseInt(tx.timeStamp, 10) * 1000).toISOString(),
+        blockNumber: parseInt(tx.blockNumber, 10),
+      });
+    }
+    console.log(`[TxIndexer] ${chain} explorer: found ${results.length} token txs for ${truncAddr(address)}`);
+    return results.slice(0, MAX_TXS);
+  } catch (err: unknown) {
+    console.warn(`[TxIndexer] ${chain} tokentx failed; falling back to eth_getLogs:`, err);
+    return null;
+  }
+}
+
+// ──────────────────────────────────────────────
 // EVM USDC (ERC-20) Indexer
 // ──────────────────────────────────────────────
 
@@ -609,6 +710,9 @@ async function fetchEVMUSDCHistory(
 ): Promise<IndexedTransaction[]> {
   const contractAddress = USDC_CONTRACTS[chain];
   if (!contractAddress) return [];
+
+  const viaExplorer = await fetchTokenViaExplorer(address, chain, contractAddress, 6);
+  if (viaExplorer) return viaExplorer;
 
   const blockResp = await fetch(rpcUrl, {
     method: 'POST',
@@ -658,7 +762,12 @@ async function fetchEVMUSDCHistory(
     }),
   });
 
-  if (inResp.ok) {
+  // An RPC refusal used to fall through as "no transfers" — the history then
+  // looked complete while every deposit was missing. Report it instead.
+  if (!inResp.ok) {
+    throw new Error(`${chain} eth_getLogs failed: HTTP ${inResp.status}`);
+  }
+  {
     const inData: {
       result?: Array<{
         transactionHash: string;
@@ -666,7 +775,11 @@ async function fetchEVMUSDCHistory(
         data?: string;
         blockNumber?: string;
       }>;
+      error?: { message: string };
     } = await inResp.json();
+    if (inData.error) {
+      throw new Error(`${chain} eth_getLogs failed: ${inData.error.message}`);
+    }
 
     for (const log of (inData.result || []).slice(0, MAX_TXS)) {
       const fromAddr = '0x' + (log.topics?.[1] || '').slice(26);
@@ -1527,6 +1640,9 @@ async function fetchUSDTEVMHistory(
   if (!contractAddress) return [];
 
   const baseChain = chain.replace('USDT_', '') as 'ETH' | 'POL';
+
+  const viaExplorer = await fetchTokenViaExplorer(address, chain, contractAddress, 6);
+  if (viaExplorer) return viaExplorer;
 
   try {
     const blockResp = await fetch(rpcUrl, {
