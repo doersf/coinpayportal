@@ -73,6 +73,8 @@ const createEscrowSchema = z.object({
   expires_in_hours: z.number({ invalid_type_error: 'expires_in_hours must be a number' }).positive('expires_in_hours must be positive').max(720, 'expires_in_hours must be at most 720 (30 days)').optional(),
   depositor_email: z.string().email('depositor_email must be a valid email').optional(),
   beneficiary_email: z.string().email('beneficiary_email must be a valid email').optional(),
+  marketplace_fee_percent: z.number({ invalid_type_error: 'marketplace_fee_percent must be a number' }).positive('marketplace_fee_percent must be greater than zero').max(20, 'marketplace_fee_percent must be at most 20').optional(),
+  marketplace_fee_address: z.string().min(10, 'marketplace_fee_address must be at least 10 characters').optional(),
 });
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -268,6 +270,31 @@ export async function createEscrow(
       };
     }
 
+    // Marketplace fee: the owning business's cut of a release, paid as its own
+    // leg at settlement. The route resolves the payee from that business's
+    // wallets, so an escrow can only ever pay its fee to the business that
+    // created it. Both fees together must leave the beneficiary something.
+    let marketplaceFeeAmount = 0;
+    if (data.marketplace_fee_percent) {
+      if (!businessId) {
+        return { success: false, error: 'marketplace_fee_percent requires an owning business' };
+      }
+      if (!data.marketplace_fee_address) {
+        return { success: false, error: `No ${data.chain} wallet to receive the marketplace fee` };
+      }
+      marketplaceFeeAmount = data.amount * (data.marketplace_fee_percent / 100);
+      if (
+        !Number.isFinite(marketplaceFeeAmount) ||
+        marketplaceFeeAmount <= 0 ||
+        feeAmount + marketplaceFeeAmount >= data.amount
+      ) {
+        return {
+          success: false,
+          error: `Refusing to create an escrow with an out-of-range marketplace fee (${marketplaceFeeAmount} of ${data.amount}).`,
+        };
+      }
+    }
+
     // Calculate expiry
     const expiresInHours = data.expires_in_hours || 24;
     const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000).toISOString();
@@ -304,6 +331,9 @@ export async function createEscrow(
         amount: data.amount,
         amount_usd: amountUsd,
         fee_amount: feeAmount,
+        marketplace_fee_percent: data.marketplace_fee_percent ?? null,
+        marketplace_fee_amount: marketplaceFeeAmount,
+        marketplace_fee_address: marketplaceFeeAmount > 0 ? data.marketplace_fee_address : null,
         status: 'pending',
         metadata: data.metadata || {},
         release_token: releaseToken,

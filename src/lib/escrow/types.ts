@@ -20,7 +20,9 @@ export type EscrowEventType =
   | 'dispute_resolved'
   | 'refunded'
   | 'expired'
-  | 'metadata_updated';
+  | 'metadata_updated'
+  | 'fee_forward_failed'
+  | 'marketplace_fee_forward_failed';
 
 export type EscrowChain =
   | 'BTC' | 'BCH' | 'ETH' | 'POL' | 'SOL'
@@ -41,6 +43,8 @@ export interface CreateEscrowInput {
   expires_in_hours?: number;               // default 24h
   depositor_email?: string;                // optional email for expiry reminders
   beneficiary_email?: string;              // optional email for settlement notifications
+  marketplace_fee_percent?: number;        // owning business's cut of a release, 0 < x <= 20
+  marketplace_fee_address?: string;        // resolved server-side from the business's wallets; never from the body
 }
 
 export interface Escrow {
@@ -59,6 +63,10 @@ export interface Escrow {
   deposit_tx_hash: string | null;
   settlement_tx_hash: string | null;
   fee_tx_hash: string | null;
+  marketplace_fee_percent?: number | null;
+  marketplace_fee_amount?: number | null;
+  marketplace_fee_address?: string | null;
+  marketplace_fee_tx_hash?: string | null;
   metadata: Record<string, unknown>;
   dispute_reason: string | null;
   dispute_resolution: string | null;

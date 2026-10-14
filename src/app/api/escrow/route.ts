@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isMultisigDefault, isMultisigEnabled } from '@/lib/multisig/engine';
 import { createClient } from '@supabase/supabase-js';
 import { createEscrow, listEscrows } from '@/lib/escrow';
+import { resolvePayee } from '@/lib/payments/payee';
 import { authenticateRequest, isMerchantAuth, type AuthContext } from '@/lib/auth/middleware';
 import { getAccessibleBusinessRoles } from '@/lib/auth/authz';
 import { can } from '@/lib/auth/permissions';
@@ -201,6 +202,42 @@ export async function POST(request: NextRequest) {
     }
     if (!normalizedBody.beneficiary_address && normalizedBody.beneficiary_email) {
       normalizedBody.beneficiary_address = `pending:${normalizedBody.beneficiary_email}`;
+    }
+
+    // Marketplace fee payee: never trusted from the body. It is the owning
+    // business's own receiving wallet for the escrow's chain, so a fee can only
+    // ever be paid to the business that created (and is billed for) the escrow.
+    delete normalizedBody.marketplace_fee_address;
+    if (normalizedBody.marketplace_fee_percent != null) {
+      if (!businessId) {
+        return NextResponse.json(
+          { error: 'marketplace_fee_percent requires an escrow owned by a business' },
+          { status: 400 }
+        );
+      }
+      const { data: owner } = await supabase
+        .from('businesses')
+        .select('merchant_id')
+        .eq('id', businessId)
+        .single();
+      const payee = owner?.merchant_id
+        ? await resolvePayee(supabase, {
+            businessId,
+            merchantId: owner.merchant_id,
+            cryptocurrency: String(normalizedBody.chain || ''),
+          })
+        : null;
+      if (!payee || !payee.ok) {
+        return NextResponse.json(
+          {
+            error: payee && !payee.ok
+              ? `Marketplace fee: ${payee.error}`
+              : 'Marketplace fee: owning business not found',
+          },
+          { status: 400 }
+        );
+      }
+      normalizedBody.marketplace_fee_address = payee.address;
     }
 
     const result = await createEscrow(supabase, {
