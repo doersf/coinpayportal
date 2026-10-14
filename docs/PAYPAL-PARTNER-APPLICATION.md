@@ -27,9 +27,22 @@ This is the working checklist for getting approved. See
 | Disputes surface (list / respond) | **Not done** — onboarding requests the scopes, no routes or UI yet |
 | Merchant can disconnect (consent revoked handling) | Done (webhook marks the account disconnected) |
 
+## Status (2026-10-14)
+
+- **Application submitted** through the "Tell us about your platform" form at
+  developer.paypal.com/platforms/overview (Profullstack, Inc., company type
+  Platform, volume under $10M). PayPal: "We are reviewing your request. A
+  PayPal representative will contact you as soon as possible."
+- **Sandbox Platform REST app created** ("Platform Partner App", sandbox
+  business account auto-generated). Unlike a Merchant app, it can call
+  Partner Referrals in sandbox today, so partner mode can be exercised end to
+  end before approval. Credentials and the sandbox partner merchant id are in
+  the logicsrc vault `coinpayportal-paypal-platform--sandbox`; the Default
+  (merchant) sandbox app is in `coinpayportal-paypal-sandbox--prod`.
+
 ## Steps
 
-### Needs Anthony (account access)
+### Needs Anthony (account access) — 1 and 2 done 2026-10-14
 
 1. **Apply.** Sign in to the PayPal business account that owns the `coinpay`
    REST app at developer.paypal.com, and request partner access for the app
