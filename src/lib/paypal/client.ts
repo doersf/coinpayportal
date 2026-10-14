@@ -119,13 +119,20 @@ function buildHeaders(
 async function paypalRequest<T>(
   creds: PaypalCredentials,
   path: string,
-  init: { method: string; body?: unknown; context?: PaypalCallContext; label: string }
+  init: {
+    method: string;
+    body?: unknown;
+    context?: PaypalCallContext;
+    label: string;
+    /** Extra request headers, e.g. `Prefer: return=representation`. */
+    headers?: Record<string, string>;
+  }
 ): Promise<T> {
   const token = await getPaypalAccessToken(creds);
   const startedAt = Date.now();
   const res = await fetch(`${paypalApiBase(creds.environment)}${path}`, {
     method: init.method,
-    headers: buildHeaders(token, creds, init.context),
+    headers: { ...buildHeaders(token, creds, init.context), ...(init.headers ?? {}) },
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   });
   logPaypalCall(init.label, init.method, path, res, startedAt);
@@ -409,7 +416,14 @@ export async function refundPaypalCapture(params: RefundParams): Promise<PaypalR
   const data = await paypalRequest<any>(
     params,
     `/v2/payments/captures/${encodeURIComponent(params.captureId)}/refund`,
-    { method: 'POST', body, context: params, label: 'PayPal refund' }
+    {
+      method: 'POST',
+      body,
+      context: params,
+      label: 'PayPal refund',
+      // The default minimal response omits the amount; ask for the full refund.
+      headers: { Prefer: 'return=representation' },
+    }
   );
 
   return {
