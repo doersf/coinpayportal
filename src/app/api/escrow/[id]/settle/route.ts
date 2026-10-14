@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { planSettlement, type SettlementPlan } from '@/lib/escrow/settlement-plan';
 import { createClient } from '@supabase/supabase-js';
 import { markEscrowSettled } from '@/lib/escrow';
 import { decrypt } from '@/lib/crypto/encryption';
@@ -40,7 +41,7 @@ export async function POST(
     const supabase = getSupabase();
 
     // Parse optional body (for refund action)
-    let action = 'release';
+    let action: 'release' | 'refund' = 'release';
     try {
       const body = await request.json();
       if (body?.action === 'refund') action = 'refund';
@@ -152,14 +153,21 @@ export async function POST(
 
     const privateKey = await decrypt(addressData.encrypted_private_key, encryptionKey);
 
-    // Determine destination
-    const destinationAddress = action === 'refund'
-      ? escrow.depositor_address
-      : escrow.beneficiary_address;
-
-    const amountToSend = action === 'refund'
-      ? (escrow.deposited_amount || escrow.amount) // Full refund (no fee on refunds)
-      : (escrow.deposited_amount || escrow.amount) - (escrow.fee_amount || 0);
+    // Who gets what. Throws when the fees would leave the beneficiary nothing,
+    // which the create path already refuses, so it means a corrupted row.
+    let plan: SettlementPlan;
+    try {
+      plan = planSettlement(escrow, action, addressData.commission_wallet);
+    } catch (planError) {
+      await releaseClaim();
+      return NextResponse.json(
+        { error: planError instanceof Error ? planError.message : 'Invalid settlement amounts' },
+        { status: 500 }
+      );
+    }
+    const destinationAddress = plan.primary.address;
+    const amountToSend = plan.primary.amount;
+    const feeLegs = plan.legs.slice(1);
 
     // Use the same forwarding infrastructure as payments
     // Import dynamically to avoid circular deps
@@ -170,6 +178,7 @@ export async function POST(
 
     let txHash: string | undefined;
     let feeTxHash: string | undefined;
+    let marketplaceFeeTxHash: string | undefined;
     let feeForwardError: string | undefined;
 
     if (!provider.sendTransaction) {
@@ -180,22 +189,20 @@ export async function POST(
       );
     }
 
-    // Use split transaction when releasing with fee — single atomic tx
+    // Use split transaction when releasing with fees — single atomic tx
     // This avoids rent/balance issues from sequential sends
-    if (action === 'release' && escrow.fee_amount > 0 && provider.sendSplitTransaction && addressData.commission_wallet) {
+    if (feeLegs.length > 0 && provider.sendSplitTransaction) {
       try {
-        const recipients = [
-          { address: destinationAddress, amount: String(amountToSend) },
-          { address: addressData.commission_wallet, amount: String(escrow.fee_amount) },
-        ];
+        const recipients = plan.legs.map((leg) => ({ address: leg.address, amount: String(leg.amount) }));
         console.log(`[Settle] Using split transaction for escrow ${escrowId}: ${JSON.stringify(recipients)}`);
         txHash = await provider.sendSplitTransaction(
           addressData.address,
           recipients,
           privateKey
         );
-        // Both beneficiary and fee are in the same tx
-        feeTxHash = txHash;
+        // Every leg is in the same tx
+        if (feeLegs.some((leg) => leg.kind === 'platform_fee')) feeTxHash = txHash;
+        if (feeLegs.some((leg) => leg.kind === 'marketplace_fee')) marketplaceFeeTxHash = txHash;
       } catch (splitError) {
         console.error(`Split transaction failed for escrow ${escrowId}, falling back to sequential:`, splitError);
         // Fall back to sequential sends
@@ -203,7 +210,7 @@ export async function POST(
       }
     }
 
-    // Fallback: sequential sends (refunds, or if split failed, or no commission)
+    // Fallback: sequential sends (refunds, or if split failed, or no fee legs)
     if (!txHash) {
       txHash = await provider.sendTransaction(
         addressData.address,
@@ -212,33 +219,37 @@ export async function POST(
         privateKey
       );
 
-      // If release (not refund), also send platform fee to commission wallet
-      if (action === 'release' && escrow.fee_amount > 0 && addressData.commission_wallet) {
+      for (const leg of feeLegs) {
         try {
-          feeTxHash = await provider.sendTransaction(
+          const legTxHash = await provider.sendTransaction(
             addressData.address,
-            addressData.commission_wallet,
-            String(escrow.fee_amount),
+            leg.address,
+            String(leg.amount),
             privateKey
           );
+          if (leg.kind === 'platform_fee') feeTxHash = legTxHash;
+          else marketplaceFeeTxHash = legTxHash;
         } catch (feeError) {
           // Non-fatal for the beneficiary — their leg already landed, and
           // unwinding it would be worse. But this used to be the end of it:
           // the escrow was marked settled with fee_tx_hash NULL and nothing
-          // recorded that the platform was still owed its fee, so the loss was
-          // invisible and unrecoverable. Write it to the escrow's event log,
-          // which is the audit trail the rest of the flow already uses.
-          feeForwardError = feeError instanceof Error ? feeError.message : String(feeError);
-          console.error(`Fee forwarding failed for escrow ${escrowId}:`, feeError);
+          // recorded that the fee was still owed, so the loss was invisible
+          // and unrecoverable. Write it to the escrow's event log, which is
+          // the audit trail the rest of the flow already uses.
+          const message = feeError instanceof Error ? feeError.message : String(feeError);
+          feeForwardError = feeForwardError ? `${feeForwardError}; ${leg.kind}: ${message}` : `${leg.kind}: ${message}`;
+          console.error(`Fee forwarding (${leg.kind}) failed for escrow ${escrowId}:`, feeError);
 
           await supabase.from('escrow_events').insert({
             escrow_id: escrowId,
-            event_type: 'fee_forward_failed',
+            event_type: leg.kind === 'platform_fee' ? 'fee_forward_failed' : 'marketplace_fee_forward_failed',
             actor: 'system',
             details: {
-              error: feeForwardError,
-              fee_amount: escrow.fee_amount,
-              commission_wallet: addressData.commission_wallet,
+              error: message,
+              fee_amount: leg.amount,
+              ...(leg.kind === 'platform_fee'
+                ? { commission_wallet: leg.address }
+                : { marketplace_fee_address: leg.address }),
               chain: escrow.chain,
               settlement_tx_hash: txHash,
               failed_at: new Date().toISOString(),
@@ -258,6 +269,7 @@ export async function POST(
         settled_at: new Date().toISOString(),
         settlement_tx_hash: txHash,
         fee_tx_hash: feeTxHash || null,
+        marketplace_fee_tx_hash: marketplaceFeeTxHash || null,
       })
       .eq('id', escrowId);
 
@@ -271,6 +283,7 @@ export async function POST(
         amount: amountToSend,
         tx_hash: txHash,
         fee_tx_hash: feeTxHash,
+        ...(marketplaceFeeTxHash ? { marketplace_fee_tx_hash: marketplaceFeeTxHash } : {}),
       },
     });
 
@@ -306,7 +319,7 @@ export async function POST(
 
     if (feeForwardError) {
       console.error(
-        `[Escrow] ${escrowId} settled but the platform fee was NOT collected: ${feeForwardError}`
+        `[Escrow] ${escrowId} settled but a fee was NOT collected: ${feeForwardError}`
       );
     }
 
@@ -315,6 +328,7 @@ export async function POST(
       status: finalStatus,
       tx_hash: txHash,
       fee_tx_hash: feeTxHash,
+      marketplace_fee_tx_hash: marketplaceFeeTxHash,
     });
   } catch (error) {
     console.error('Escrow settlement error:', error);

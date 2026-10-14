@@ -296,6 +296,91 @@ describe('Escrow Service', () => {
       expect(result.escrow!.release_token).toMatch(/^esc_/);
       expect(result.escrow!.beneficiary_token).toMatch(/^esc_/);
     });
+
+    describe('marketplace fee', () => {
+      function capturingSupabase() {
+        const inserts: Record<string, any>[] = [];
+        const supabase = {
+          from: vi.fn((table: string) => {
+            const chain: any = {};
+            chain.select = vi.fn().mockReturnValue(chain);
+            chain.update = vi.fn().mockReturnValue(chain);
+            chain.eq = vi.fn().mockReturnValue(chain);
+            chain.insert = vi.fn((row: Record<string, any>) => {
+              if (table === 'escrows') inserts.push(row);
+              return chain;
+            });
+            chain.single = vi.fn().mockImplementation(async () => {
+              if (table === 'system_wallet_indexes') return { data: { next_index: 5 }, error: null };
+              if (table === 'payment_addresses') return { data: { id: 'addr-1' }, error: null };
+              if (table === 'escrows') return { data: { id: 'esc-1', ...inserts[inserts.length - 1] }, error: null };
+              return { data: null, error: null };
+            });
+            return chain;
+          }),
+        } as any;
+        return { supabase, inserts };
+      }
+
+      const base = {
+        chain: 'ETH' as const,
+        amount: 2.0,
+        depositor_address: '0x1111111111111111111111111111111111111111',
+        beneficiary_address: '0x2222222222222222222222222222222222222222',
+        business_id: '11111111-1111-4111-8111-111111111111',
+      };
+
+      it('stores the fee amount and payee when a percent is given', async () => {
+        const { supabase, inserts } = capturingSupabase();
+        const result = await createEscrow(supabase, {
+          ...base,
+          marketplace_fee_percent: 5,
+          marketplace_fee_address: '0x3333333333333333333333333333333333333333',
+        });
+        expect(result.success).toBe(true);
+        expect(inserts[0].marketplace_fee_percent).toBe(5);
+        expect(inserts[0].marketplace_fee_amount).toBeCloseTo(0.1);
+        expect(inserts[0].marketplace_fee_address).toBe('0x3333333333333333333333333333333333333333');
+      });
+
+      it('stores a zero fee and no payee when no percent is given', async () => {
+        const { supabase, inserts } = capturingSupabase();
+        const result = await createEscrow(supabase, base);
+        expect(result.success).toBe(true);
+        expect(inserts[0].marketplace_fee_amount).toBe(0);
+        expect(inserts[0].marketplace_fee_address).toBeNull();
+      });
+
+      it('refuses a fee with no owning business', async () => {
+        const { supabase } = capturingSupabase();
+        const { business_id: _omit, ...noBusiness } = base;
+        const result = await createEscrow(supabase, {
+          ...noBusiness,
+          marketplace_fee_percent: 5,
+          marketplace_fee_address: '0x3333333333333333333333333333333333333333',
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/owning business/);
+      });
+
+      it('refuses a fee with no payee', async () => {
+        const { supabase } = capturingSupabase();
+        const result = await createEscrow(supabase, { ...base, marketplace_fee_percent: 5 });
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/wallet to receive the marketplace fee/);
+      });
+
+      it('refuses a percent above 20', async () => {
+        const { supabase } = capturingSupabase();
+        const result = await createEscrow(supabase, {
+          ...base,
+          marketplace_fee_percent: 25,
+          marketplace_fee_address: '0x3333333333333333333333333333333333333333',
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/at most 20/);
+      });
+    });
   });
 
   describe('releaseEscrow', () => {
