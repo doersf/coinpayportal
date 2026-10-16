@@ -55,7 +55,7 @@ export interface DailyStats {
   };
   escrows: { total: number; funded: number; new24h: number };
   businesses: { total: number; new24h: number; new7d: number; new30d: number };
-  recentBusinesses: { name: string | null; created_at: string | null }[];
+  recentBusinesses: { name: string | null; created_at: string | null; webhook_url?: string | null }[];
   integrations: {
     withApiKey: number;
     newApiKeys24h: number;
@@ -122,6 +122,23 @@ async function recent<T>(supabase: Client, table: string, columns: string, limit
     .limit(limit);
   if (error) throw new DailyStatsQueryError(`recent(${table})`, errMessage(error));
   return (data ?? []) as T[];
+}
+
+/**
+ * The merchant's site, for the report's business list. Businesses have no
+ * website column, so this is the origin of the webhook they configured: the
+ * one URL every integrated business gives us. Null when there is none, or it
+ * is not an http(s) URL.
+ */
+export function businessSiteUrl(webhookUrl: string | null | undefined): string | null {
+  if (!webhookUrl) return null;
+  try {
+    const u = new URL(webhookUrl);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+    return u.origin;
+  } catch {
+    return null;
+  }
 }
 
 /** Every row of a select, paged by id so a table past 1000 rows is not truncated. */
@@ -215,7 +232,7 @@ export async function collectDailyStats(supabase: Client, now: Date = new Date()
     countSince(supabase, 'businesses', 'created_at', d1, '24h'),
     countSince(supabase, 'businesses', 'created_at', d7, '7d'),
     countSince(supabase, 'businesses', 'created_at', d30, '30d'),
-    recent<DailyStats['recentBusinesses'][number]>(supabase, 'businesses', 'name, created_at', 5),
+    recent<DailyStats['recentBusinesses'][number]>(supabase, 'businesses', 'name, created_at, webhook_url', 5),
 
     countNotNull(supabase, 'businesses', 'api_key'),
     countSinceNotNull(supabase, 'businesses', 'api_key_created_at', 'api_key', d1),
@@ -349,7 +366,7 @@ BUSINESSES
   New (24h): ${b.new24h}
   New (7d): ${b.new7d}
   New (30d): ${b.new30d}
-${s.recentBusinesses.map((r) => `  - ${r.name || '(no name)'} (${day(r.created_at)})`).join('\n') || '  (none)'}
+${s.recentBusinesses.map((r) => `  - ${r.name || '(no name)'}${businessSiteUrl(r.webhook_url) ? ` - ${businessSiteUrl(r.webhook_url)}` : ''} (${day(r.created_at)})`).join('\n') || '  (none)'}
 
 INTEGRATIONS
   Businesses with API key: ${i.withApiKey}
@@ -404,8 +421,13 @@ SPAM DETECTION
     ? `<ul style="font-size: 13px; padding-left: 20px; margin: 0 0 20px;">
       ${s.recentBusinesses
         .map(
-          (r) =>
-            `<li style="margin-bottom: 4px;"><strong>${escapeHtml(r.name || '(no name)')}</strong> <span style="color: #999;">(${escapeHtml(day(r.created_at))})</span></li>`
+          (r) => {
+            const site = businessSiteUrl(r.webhook_url);
+            const link = site
+              ? ` - <a href="${escapeHtml(site)}" style="color: #7c3aed;">${escapeHtml(new URL(site).host)}</a>`
+              : '';
+            return `<li style="margin-bottom: 4px;"><strong>${escapeHtml(r.name || '(no name)')}</strong>${link} <span style="color: #999;">(${escapeHtml(day(r.created_at))})</span></li>`;
+          }
         )
         .join('')}
     </ul>`
