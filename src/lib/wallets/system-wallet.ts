@@ -27,6 +27,7 @@ import * as bitcoin from 'bitcoinjs-lib';
 import { ethers } from 'ethers';
 import { createHmac } from 'crypto';
 import { encrypt, decrypt } from '../crypto/encryption';
+import { deriveTronWallet } from '../tron/address';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getFeePercentage, FEE_PERCENTAGE_FREE, FEE_PERCENTAGE_PAID } from '../payments/fees';
 import {
@@ -42,7 +43,7 @@ import {
 export type SystemBlockchain =
   | 'BTC' | 'BCH' | 'ETH' | 'POL' | 'SOL'
   | 'DOGE' | 'XRP' | 'ADA' | 'BNB'
-  | 'USDT' | 'USDT_ETH' | 'USDT_POL' | 'USDT_SOL'
+  | 'USDT' | 'USDT_ETH' | 'USDT_POL' | 'USDT_SOL' | 'USDT_TRON'
   | 'USDC' | 'USDC_ETH' | 'USDC_POL' | 'USDC_SOL' | 'USDC_BASE';
 
 /**
@@ -157,6 +158,11 @@ function getSystemMnemonic(cryptocurrency: SystemBlockchain): string {
   if (!mnemonic && cryptocurrency === 'USDT_SOL') {
     mnemonic = process.env['SYSTEM_MNEMONIC_SOL'];
   }
+  // TRON derives on its own coin type (195), so reusing the ETH seed yields
+  // unrelated keys; a dedicated SYSTEM_MNEMONIC_TRON wins when set.
+  if (!mnemonic && cryptocurrency === 'USDT_TRON') {
+    mnemonic = process.env['SYSTEM_MNEMONIC_TRON'] || process.env['SYSTEM_MNEMONIC_ETH'];
+  }
 
   // POL, BNB, USDT, USDC (generic) use the same derivation as ETH, so fall back to ETH mnemonic
   if (!mnemonic && (cryptocurrency === 'POL' || cryptocurrency === 'BNB' || cryptocurrency === 'USDT' || cryptocurrency === 'USDC')) {
@@ -207,6 +213,9 @@ export function getCommissionWallet(cryptocurrency: SystemBlockchain): string {
   }
   if (!wallet && cryptocurrency === 'USDT_SOL') {
     wallet = process.env['PLATFORM_FEE_WALLET_SOL'];
+  }
+  if (!wallet && cryptocurrency === 'USDT_TRON') {
+    wallet = process.env['PLATFORM_FEE_WALLET_TRON'];
   }
 
   // POL, BNB, USDT, USDC (generic) use the same address as ETH (EVM compatible)
@@ -730,6 +739,23 @@ export function deriveGasRelayerWallet(
   };
 }
 
+/** USDT on TRON settles only once the platform's TRON fee wallet is configured. */
+export function isUsdtTronEnabled(): boolean {
+  return Boolean(process.env.PLATFORM_FEE_WALLET_USDT_TRON || process.env.PLATFORM_FEE_WALLET_TRON);
+}
+
+/**
+ * The TRON gas relayer: account 1 of the TRON derivation, so it can never be
+ * handed out as a payment address (those live on account 0). It pays the
+ * energy for every USDT (TRC-20) sweep and must hold TRX.
+ */
+export const TRON_RELAYER_DERIVATION_PATH = "m/44'/195'/1'/0/0";
+
+export function deriveTronRelayerWallet(): { address: string; privateKey: string } {
+  const { address, privateKey } = deriveTronWallet(getSystemMnemonic('USDT_TRON'), 0, 1);
+  return { address, privateKey };
+}
+
 export async function deriveSystemPaymentAddress(
   cryptocurrency: SystemBlockchain,
   index: number
@@ -778,6 +804,12 @@ export async function deriveSystemPaymentAddress(
       wallet = await deriveCardanoWallet(mnemonic, index);
       derivationPath = `m/44'/1815'/${index}'/0'`;
       break;
+    case 'USDT_TRON': {
+      const tron = deriveTronWallet(mnemonic, index);
+      wallet = { address: tron.address, privateKey: tron.privateKey };
+      derivationPath = tron.derivationPath;
+      break;
+    }
     default:
       throw new Error(`Unsupported cryptocurrency: ${cryptocurrency}`);
   }

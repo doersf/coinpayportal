@@ -31,7 +31,7 @@ USDC_POL: 0xEf993488b444b75585A5CCe171e65F4dD9D99add
     const result = parseWalletPasteText(`
 BTC: first
 BAD LINE
-USDT_TRON: T123
+USDT_BSC: 0x123
 BTC: second
     `);
 
@@ -42,7 +42,7 @@ BTC: second
       },
     ]);
     expect(result.invalidLines).toEqual(['BAD LINE']);
-    expect(result.unsupportedCryptocurrencies).toEqual(['USDT_TRON']);
+    expect(result.unsupportedCryptocurrencies).toEqual(['USDT_BSC']);
     expect(result.duplicateCryptocurrencies).toEqual(['BTC']);
   });
 });

@@ -60,6 +60,7 @@ const ASSET_DECIMALS: Record<string, number> = {
   USDT_ETH: 6,
   USDT_POL: 6,
   USDT_SOL: 6,
+  USDT_TRON: 6,
   USDC: 6,
   USDC_ETH: 6,
   USDC_POL: 6,

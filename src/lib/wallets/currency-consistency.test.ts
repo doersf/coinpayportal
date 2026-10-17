@@ -27,6 +27,7 @@ const SAMPLES = {
   evm: '0x1234567890123456789012345678901234567890',
   solana: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   bitcoin: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq',
+  tron: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
 };
 
 /**
@@ -36,7 +37,7 @@ const SAMPLES = {
  * symbol is added to `CRYPTO_NAMES` without a decision recorded here, the last
  * test in this file fails and forces that decision to be made explicitly.
  */
-const EXPECTED_FAMILY: Record<string, 'evm' | 'solana' | 'bitcoin' | 'other'> = {
+const EXPECTED_FAMILY: Record<string, 'evm' | 'solana' | 'bitcoin' | 'tron' | 'other'> = {
   BTC: 'bitcoin',
   BCH: 'other',
   ETH: 'evm',
@@ -52,6 +53,7 @@ const EXPECTED_FAMILY: Record<string, 'evm' | 'solana' | 'bitcoin' | 'other'> = 
   USDT_ETH: 'evm',
   USDT_POL: 'evm',
   USDT_SOL: 'solana',
+  USDT_TRON: 'tron',
   USDC_ETH: 'evm',
   USDC_POL: 'evm',
   USDC_SOL: 'solana',

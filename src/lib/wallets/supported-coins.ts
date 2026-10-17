@@ -13,6 +13,7 @@ export const CRYPTO_NAMES: Record<string, string> = {
   USDT_ETH: 'Tether (Ethereum)',
   USDT_POL: 'Tether (Polygon)',
   USDT_SOL: 'Tether (Solana)',
+  USDT_TRON: 'Tether (TRON, TRC-20)',
   USDC: 'USD Coin',
   USDC_ETH: 'USD Coin (Ethereum)',
   USDC_POL: 'USD Coin (Polygon)',
@@ -29,6 +30,7 @@ const TOKEN_CHAIN_NAMES: Record<string, string> = {
   POL: 'Polygon',
   SOL: 'Solana',
   BSC: 'BNB Chain',
+  TRON: 'TRON',
 };
 
 export type WalletSource = 'business' | 'merchant_global' | 'web_wallet';

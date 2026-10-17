@@ -41,7 +41,8 @@ import {
   RelayerUnderfundedError,
 } from './evm-gas';
 import { alertRelayerUnderfunded } from './relayer-health';
-import { getCommissionWallet, type SystemBlockchain } from './system-wallet';
+import { getCommissionWallet, deriveTronRelayerWallet, type SystemBlockchain } from './system-wallet';
+import { forwardTronUsdtSplit } from '../tron/forward';
 import { checkBalance as checkAddressBalance } from '@/app/api/cron/monitor-payments/balance-checkers';
 
 const EVM_TOKEN_CONFIG = {
@@ -244,6 +245,26 @@ function isEVMToken(chain: BlockchainType): chain is keyof typeof EVM_TOKEN_CONF
 
 function isSolanaToken(chain: BlockchainType): chain is keyof typeof SOLANA_TOKEN_CONFIG {
   return chain in SOLANA_TOKEN_CONFIG;
+}
+
+/** USDT on TRON: swept by lib/tron/forward, with energy paid by the TRON gas relayer. */
+function isTronToken(chain: BlockchainType): boolean {
+  return chain === 'USDT_TRON';
+}
+
+async function forwardTronTokenSplit(
+  privateKey: string,
+  payouts: Array<{ address: string; amount: number }>
+): Promise<{ merchantTxHash: string; platformTxHash: string }> {
+  const relayer = deriveTronRelayerWallet();
+  try {
+    return await forwardTronUsdtSplit(privateKey, payouts, relayer.privateKey);
+  } catch (error) {
+    // forwardTronUsdtSplit checks the relayer before it broadcasts anything,
+    // so an underfunded relayer means provably nothing was sent.
+    if (error instanceof RelayerUnderfundedError) throw new ForwardNotStartedError(error);
+    throw error;
+  }
 }
 
 function toTokenUnits(amount: number, decimals: number): bigint {
@@ -582,7 +603,12 @@ export async function forwardPaymentSecurely(
 
     const rpcUrl = getRpcUrl(addressData.cryptocurrency);
     const provider = getProvider(addressData.cryptocurrency, rpcUrl);
-    if (!isEVMToken(addressData.cryptocurrency) && !isSolanaToken(addressData.cryptocurrency) && !provider.sendTransaction) {
+    if (
+      !isEVMToken(addressData.cryptocurrency) &&
+      !isSolanaToken(addressData.cryptocurrency) &&
+      !isTronToken(addressData.cryptocurrency) &&
+      !provider.sendTransaction
+    ) {
       return { success: false, error: `Manual forwarding required for ${addressData.cryptocurrency}` };
     }
 
@@ -623,7 +649,9 @@ export async function forwardPaymentSecurely(
     // advance native currency and recover it here. Splitting the surcharge 99/1
     // like the rest of the payment — which is what used to happen — handed 99%
     // of the gas money to the merchant and left the float permanently short.
-    const gasReserve = isEVMToken(addressData.cryptocurrency)
+    // TRON tokens are in the same position as EVM ones: the deposit holds
+    // USDT, the energy is paid in TRX by the relayer.
+    const gasReserve = isEVMToken(addressData.cryptocurrency) || isTronToken(addressData.cryptocurrency)
       ? computeGasReserve(payment.crypto_amount, payment.metadata)
       : 0;
 
@@ -765,6 +793,14 @@ export async function forwardPaymentSecurely(
         merchantTxHash = tokenTxHashes.merchantTxHash;
         platformTxHash = tokenTxHashes.platformTxHash;
         console.log(`[SECURE] Forwarded EVM token payment ${paymentId}: merchant=${merchantTxHash}, platform=${platformTxHash}`);
+      } else if (isTronToken(addressData.cryptocurrency)) {
+        const tokenTxHashes = await forwardTronTokenSplit(sensitiveData.privateKey, [
+          { address: addressData.merchant_wallet, amount: merchantAmount },
+          { address: addressData.commission_wallet, amount: platformFee },
+        ]);
+        merchantTxHash = tokenTxHashes.merchantTxHash;
+        platformTxHash = tokenTxHashes.platformTxHash;
+        console.log(`[SECURE] Forwarded USDT_TRON payment ${paymentId}: merchant=${merchantTxHash}, platform=${platformTxHash}`);
       } else if (isSolanaToken(addressData.cryptocurrency)) {
         const tokenTxHashes = await forwardSolanaTokenSplit(
           addressData.cryptocurrency,

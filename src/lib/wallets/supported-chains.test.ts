@@ -54,6 +54,7 @@ describe('STABLECOIN_RAILS', () => {
       Polygon: 'POL',
       Solana: 'SOL',
       Base: 'BASE',
+      TRON: 'TRON',
     };
 
     for (const rail of STABLECOIN_RAILS) {

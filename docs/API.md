@@ -518,6 +518,7 @@ Generate a new payment request. This is the primary endpoint merchants use to ac
 | `USDC_POL` | USDC (Polygon) | USDC stablecoin on Polygon |
 | `USDC_BASE` | USDC (Base) | Native USDC stablecoin on Base |
 | `USDC_SOL` | USDC (Solana) | USDC stablecoin on Solana |
+| `USDT_TRON` | USDT (TRON) | Tether TRC-20 on TRON. Also accepted as `currency: "usdt_tron"` or `"usdt_trc20"`. Off until the operator configures it (see below). |
 
 **Response:**
 ```json

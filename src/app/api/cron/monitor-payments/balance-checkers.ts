@@ -5,6 +5,7 @@
  * Used by the payment/escrow monitor to detect deposits.
  */
 
+import { getUsdtTronBalance } from '@/lib/tron/client';
 import * as bitcoin from 'bitcoinjs-lib';
 import { fetchWithTimeout } from '@/lib/http/fetch-timeout';
 import { evmRpcCall, type EvmBaseChain } from '@/lib/web-wallet/evm-rpc';
@@ -582,6 +583,9 @@ export async function checkBalance(address: string, blockchain: string): Promise
       return checkSolanaTokenBalance(address, RPC_ENDPOINTS.SOL, SOLANA_TOKENS.USDT_SOL.mintAddress, SOLANA_TOKENS.USDT_SOL.decimals);
     case 'USDC_SOL':
       return checkSolanaTokenBalance(address, RPC_ENDPOINTS.SOL, SOLANA_TOKENS.USDC_SOL.mintAddress, SOLANA_TOKENS.USDC_SOL.decimals);
+    case 'USDT_TRON':
+      // Solidified head only: throws on a TronGrid failure rather than reading 0.
+      return getUsdtTronBalance(address);
     case 'BNB':
       return checkEVMBalance(address, 'BNB');
     case 'DOGE':

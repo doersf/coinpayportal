@@ -47,7 +47,7 @@ export const SUPPORTED_CHAINS: readonly SupportedChain[] = [
  */
 export const STABLECOIN_RAILS: readonly { asset: string; chains: readonly string[] }[] = [
   { asset: 'USDC', chains: ['Ethereum', 'Polygon', 'Solana', 'Base'] },
-  { asset: 'USDT', chains: ['Ethereum', 'Polygon', 'Solana'] },
+  { asset: 'USDT', chains: ['Ethereum', 'Polygon', 'Solana', 'TRON'] },
 ];
 
 /**

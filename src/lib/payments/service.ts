@@ -16,7 +16,7 @@ export { STATIC_NETWORK_FEES_USD, getEstimatedNetworkFee, getStaticNetworkFee };
 export type Blockchain =
   | 'BTC' | 'BCH' | 'ETH' | 'POL' | 'SOL'
   | 'DOGE' | 'XRP' | 'ADA' | 'BNB'
-  | 'USDT' | 'USDT_ETH' | 'USDT_POL' | 'USDT_SOL'
+  | 'USDT' | 'USDT_ETH' | 'USDT_POL' | 'USDT_SOL' | 'USDT_TRON'
   | 'USDC'
   | 'USDC_ETH' | 'USDC_POL' | 'USDC_SOL' | 'USDC_BASE';
 
@@ -118,7 +118,7 @@ export function paymentWindowMinutes(
 const blockchainSchema = z.enum([
   'BTC', 'BCH', 'ETH', 'POL', 'SOL',
   'DOGE', 'XRP', 'ADA', 'BNB',
-  'USDT', 'USDT_ETH', 'USDT_POL', 'USDT_SOL',
+  'USDT', 'USDT_ETH', 'USDT_POL', 'USDT_SOL', 'USDT_TRON',
   'USDC',
   'USDC_ETH', 'USDC_POL', 'USDC_SOL', 'USDC_BASE',
 ]);
@@ -478,7 +478,7 @@ export async function createPayment(
     // Only generate system wallet address for supported blockchains
     const supportedBlockchains: SystemBlockchain[] = [
       'BTC', 'BCH', 'ETH', 'POL', 'SOL', 'DOGE', 'XRP', 'ADA', 'BNB',
-      'USDT', 'USDT_ETH', 'USDT_POL', 'USDT_SOL',
+      'USDT', 'USDT_ETH', 'USDT_POL', 'USDT_SOL', 'USDT_TRON',
       'USDC', 'USDC_ETH', 'USDC_POL', 'USDC_SOL', 'USDC_BASE',
     ];
     if (supportedBlockchains.includes(paymentAddressCryptocurrency)) {

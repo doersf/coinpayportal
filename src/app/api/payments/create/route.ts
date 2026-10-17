@@ -13,7 +13,7 @@ import {
   getPaymentReceivingWallet,
   verifyBusinessAccess,
 } from '@/lib/wallets/supported-coins';
-import { isPlatformFeeWallet } from '@/lib/wallets/system-wallet';
+import { isPlatformFeeWallet, isUsdtTronEnabled } from '@/lib/wallets/system-wallet';
 import { isValidPayoutAddress } from '@/lib/blockchain/address-format';
 import { authorizeBusiness } from '@/lib/auth/authz';
 import { screenCheckout } from '@/lib/fraud/screen';
@@ -41,6 +41,8 @@ function mapCurrencyToBlockchain(currency: string): Blockchain | null {
     'usdt_eth': 'USDT_ETH',
     'usdt_pol': 'USDT_POL',
     'usdt_sol': 'USDT_SOL',
+    'usdt_tron': 'USDT_TRON',
+    'usdt_trc20': 'USDT_TRON',
     'usdc': 'USDC',      // ERC-20 on Ethereum
     'usdc_eth': 'USDC_ETH',
     'usdc_pol': 'USDC_POL',
@@ -421,6 +423,16 @@ export async function POST(request: NextRequest) {
     if (needsCrypto && !blockchainType) {
       return NextResponse.json(
         { success: false, error: 'Invalid or missing cryptocurrency type' },
+        { status: 400 }
+      );
+    }
+
+    // USDT on TRON needs the platform's TRON fee wallet (and a funded TRON gas
+    // relayer) before it can settle. Until an operator configures it, say so
+    // up front instead of failing deep inside address generation.
+    if (needsCrypto && blockchainType === 'USDT_TRON' && !isUsdtTronEnabled()) {
+      return NextResponse.json(
+        { success: false, error: 'USDT on TRON is not enabled on this CoinPay instance yet', code: 'CHAIN_NOT_ENABLED' },
         { status: 400 }
       );
     }

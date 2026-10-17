@@ -6,7 +6,7 @@ import QRCode from 'qrcode';
 export type Blockchain =
   | 'BTC' | 'BCH' | 'ETH' | 'POL' | 'SOL'
   | 'DOGE' | 'XRP' | 'ADA' | 'BNB'
-  | 'USDT' | 'USDT_ETH' | 'USDT_POL' | 'USDT_SOL'
+  | 'USDT' | 'USDT_ETH' | 'USDT_POL' | 'USDT_SOL' | 'USDT_TRON'
   | 'USDC'
   | 'USDC_ETH' | 'USDC_POL' | 'USDC_SOL';
 
@@ -152,6 +152,7 @@ function getPaymentScheme(blockchain: Blockchain): string {
     USDT_ETH: 'ethereum',
     USDT_POL: 'ethereum',
     USDT_SOL: 'solana',
+    USDT_TRON: 'tron', // unused: a TRON code is the bare address
     USDC: 'ethereum', // USDC is ERC-20
     USDC_ETH: 'ethereum',
     USDC_POL: 'ethereum', // EIP-681: all EVM chains use ethereum: scheme with chain ID
@@ -203,6 +204,13 @@ function buildPaymentURI(params: PaymentQRParams): string {
 
   // Get URI scheme
   const scheme = getPaymentScheme(blockchain);
+
+  // TRON has no payment-URI standard that wallets agree on for a TRC-20
+  // amount (TronLink, Trust and Exodus all read a bare address), so the code
+  // carries only the address and the page shows the exact amount to send.
+  if (blockchain === 'USDT_TRON') {
+    return address;
+  }
 
   // Handle EVM chains (ETH, POL, USDC_ETH, USDC_POL) - EIP-681 format
   if (isEVMChain(blockchain)) {

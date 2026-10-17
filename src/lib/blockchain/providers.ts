@@ -25,7 +25,7 @@ const ECPair = ECPairFactory(ecc);
 export type BlockchainType =
   | 'BTC' | 'BCH' | 'ETH' | 'POL' | 'SOL'
   | 'DOGE' | 'XRP' | 'ADA' | 'BNB'
-  | 'USDT' | 'USDT_ETH' | 'USDT_POL' | 'USDT_SOL'
+  | 'USDT' | 'USDT_ETH' | 'USDT_POL' | 'USDT_SOL' | 'USDT_TRON'
   | 'USDC'
   | 'USDC_ETH' | 'USDC_POL' | 'USDC_SOL' | 'USDC_BASE';
 
@@ -2101,6 +2101,47 @@ export class AdaProvider implements BlockchainProvider {
 }
 
 /**
+ * USDT (TRC-20) on TRON, read through TronGrid (lib/tron/client).
+ *
+ * Read-only on purpose: a TRC-20 sweep needs the TRON gas relayer to pay for
+ * energy first, so forwarding goes through lib/tron/forward from
+ * secure-forwarding rather than a generic sendTransaction.
+ */
+export class TronUsdtProvider implements BlockchainProvider {
+  chain: BlockchainType = 'USDT_TRON';
+  rpcUrl: string;
+
+  constructor(rpcUrl: string) {
+    this.rpcUrl = rpcUrl;
+  }
+
+  async getBalance(address: string): Promise<string> {
+    const { getTrc20Balance, fromTokenUnits } = await import('@/lib/tron/client');
+    return String(fromTokenUnits(await getTrc20Balance(address)));
+  }
+
+  async getTransaction(txHash: string): Promise<TransactionDetails> {
+    const { getSolidifiedTxInfo } = await import('@/lib/tron/client');
+    const info = await getSolidifiedTxInfo(txHash);
+    return {
+      hash: txHash,
+      from: '',
+      to: '',
+      value: '0',
+      // Solidified = irreversible on TRON, so it counts as fully confirmed.
+      confirmations: info.found ? this.getRequiredConfirmations() : 0,
+      blockNumber: info.blockNumber,
+      status: !info.found ? 'pending' : info.result === 'SUCCESS' ? 'confirmed' : 'failed',
+    };
+  }
+
+  /** TRON solidifies a block after ~19 confirmations. */
+  getRequiredConfirmations(): number {
+    return 19;
+  }
+}
+
+/**
  * Factory function to get the appropriate provider for a blockchain
  */
 export function getProvider(
@@ -2135,6 +2176,8 @@ export function getProvider(
       return new XrpProvider(rpcUrl);
     case 'ADA':
       return new AdaProvider(rpcUrl);
+    case 'USDT_TRON':
+      return new TronUsdtProvider(rpcUrl);
     default:
       throw new Error(`Unsupported blockchain: ${chain}`);
   }
@@ -2158,6 +2201,7 @@ export function getRpcUrl(chain: BlockchainType): string {
     USDT_ETH: process.env.ETHEREUM_RPC_URL || 'https://ethereum-rpc.publicnode.com',
     USDT_POL: process.env.POLYGON_RPC_URL || 'https://polygon-bor-rpc.publicnode.com',
     USDT_SOL: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+    USDT_TRON: process.env.TRON_API_URL || 'https://api.trongrid.io',
     USDC: process.env.ETHEREUM_RPC_URL || 'https://ethereum-rpc.publicnode.com',
     USDC_ETH: process.env.ETHEREUM_RPC_URL || 'https://ethereum-rpc.publicnode.com',
     USDC_POL: process.env.POLYGON_RPC_URL || 'https://polygon-bor-rpc.publicnode.com',
