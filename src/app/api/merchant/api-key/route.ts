@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { verifySession } from '@/lib/auth/service';
 import { listBusinesses, regenerateApiKey } from '@/lib/business/service';
+import { oauthFundsMoveRefusalBody } from '@/lib/auth/oauth-funds';
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -26,6 +27,13 @@ async function resolveMerchantAndBusiness(request: NextRequest) {
   const session = await verifySession(supabase, token);
   if (!session.success || !session.merchant) {
     return { error: session.error || 'Unauthorized', status: 401 as const };
+  }
+
+  // A business API key can send payouts. An app signed in with CoinPay cannot
+  // move funds, so it can neither read nor mint one.
+  if (session.via === 'oauth') {
+    const refusal = oauthFundsMoveRefusalBody();
+    return { error: refusal.error, code: refusal.code, status: 403 as const };
   }
 
   const businessesResult = await listBusinesses(supabase, session.merchant.id);
@@ -60,7 +68,7 @@ export async function GET(request: NextRequest) {
     const resolved = await resolveMerchantAndBusiness(request);
     if ('error' in resolved) {
       return NextResponse.json(
-        { success: false, error: resolved.error },
+        { success: false, error: resolved.error, ...('code' in resolved && resolved.code ? { code: resolved.code } : {}) },
         { status: resolved.status }
       );
     }
@@ -92,7 +100,7 @@ export async function POST(request: NextRequest) {
     const resolved = await resolveMerchantAndBusiness(request);
     if ('error' in resolved) {
       return NextResponse.json(
-        { success: false, error: resolved.error },
+        { success: false, error: resolved.error, ...('code' in resolved && resolved.code ? { code: resolved.code } : {}) },
         { status: resolved.status }
       );
     }

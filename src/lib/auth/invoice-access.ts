@@ -24,6 +24,8 @@ export type InvoiceAccessOk = {
   ok: true;
   merchantId: string;
   apiKeyBusinessId: string | null;
+  /** How the caller authenticated; pass it on to `authorizeBusiness` for `funds.move`. */
+  via: 'api_key' | 'session' | 'oauth';
   /**
    * The caller's role on the invoice's business, or null when they
    * authenticated with a business API key (which is scoped to one business and
@@ -44,7 +46,7 @@ export async function authorizeInvoice(
 ): Promise<InvoiceAccessOk | InvoiceAccessErr> {
   const auth = await resolveMerchant(supabase, request);
   if ('error' in auth) return { ok: false, status: auth.status, error: auth.error };
-  const { merchantId, apiKeyBusinessId } = auth;
+  const { merchantId, apiKeyBusinessId, via } = auth;
 
   const { data: invoice, error } = await supabase
     .from('invoices')
@@ -65,7 +67,7 @@ export async function authorizeInvoice(
       return { ok: false, status: 404, error: 'Invoice not found' };
     }
   } else {
-    const authz = await authorizeBusiness(supabase, merchantId, businessId, capability);
+    const authz = await authorizeBusiness(supabase, { merchantId, via }, businessId, capability);
     if (!authz.ok) {
       // 404 when the caller has no access at all (don't reveal the invoice exists);
       // 403 when they can see the business but lack the capability.
@@ -74,5 +76,5 @@ export async function authorizeInvoice(
     role = authz.role;
   }
 
-  return { ok: true, merchantId, apiKeyBusinessId, role, invoice };
+  return { ok: true, merchantId, apiKeyBusinessId, via, role, invoice };
 }

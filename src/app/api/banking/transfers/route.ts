@@ -3,6 +3,7 @@ import { requireMerchant } from '@/lib/auth/merchant-guard';
 import { bankTransfersEnabled } from '@/lib/banking/providers';
 import { originateTransfer, publicTransfer } from '@/lib/banking/service';
 import { bankingDeps, bankingErrorResponse, resolveBusinessId, NO_STORE } from '@/lib/banking/http';
+import { refuseOAuthFundsMove } from '@/lib/auth/oauth-funds';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +39,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const guard = await requireMerchant(req);
   if (guard instanceof NextResponse) return guard;
+  // Apps signed in with CoinPay cannot move money; the dashboard can.
+  const oauthRefusal = refuseOAuthFundsMove(guard);
+  if (oauthRefusal) return oauthRefusal;
 
   if (!bankTransfersEnabled()) {
     return NextResponse.json({ error: 'Bank transfers are not enabled' }, { status: 404 });

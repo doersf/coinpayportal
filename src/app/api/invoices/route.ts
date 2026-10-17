@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: authResult.error }, { status: authResult.status });
     }
 
-    const { merchantId, apiKeyBusinessId } = authResult;
+    const { merchantId, apiKeyBusinessId, via } = authResult;
 
     const body = await request.json();
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -157,12 +157,20 @@ export async function POST(request: NextRequest) {
     // API-key callers are not covered here: a key is scoped to its business
     // rather than to a role, and is already restricted to that one business.
     if (merchant_wallet_address && !apiKeyBusinessId) {
+      // `via` carries an OAuth login through, so an app signed in with CoinPay
+      // is refused (oauth_cannot_move_funds) even when it acts as the owner.
       const fundsAuthz = await authorizeBusiness(
         supabase,
-        merchantId,
+        { merchantId, via },
         resolvedBusinessId,
         'funds.move',
       );
+      if (!fundsAuthz.ok && fundsAuthz.code) {
+        return NextResponse.json(
+          { success: false, error: fundsAuthz.error, code: fundsAuthz.code },
+          { status: fundsAuthz.status }
+        );
+      }
       if (!fundsAuthz.ok) {
         return NextResponse.json(
           {

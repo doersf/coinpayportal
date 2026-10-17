@@ -18,10 +18,29 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type Role, type Capability, can, ROLE_RANK } from './permissions';
+import { type AuthVia, OAUTH_CANNOT_MOVE_FUNDS, OAUTH_CANNOT_MOVE_FUNDS_MESSAGE } from './oauth-funds';
 
 export type AuthzOk = { ok: true; role: Role };
-export type AuthzErr = { ok: false; status: 403 | 404; error: string };
+export type AuthzErr = { ok: false; status: 403 | 404; error: string; code?: string };
 export type AuthzResult = AuthzOk | AuthzErr;
+
+/**
+ * Who is asking: a merchant id (a dashboard session, the legacy form), or the
+ * id plus how they authenticated. Pass the object form wherever the caller may
+ * have come in with an OAuth access token, so `funds.move` is refused to it.
+ */
+export type AuthzActor = string | { merchantId: string; via?: AuthVia | null };
+
+/** Capabilities an OAuth access token never holds, whatever the role. */
+const OAUTH_DENIED_CAPABILITIES: ReadonlySet<Capability> = new Set<Capability>(['funds.move']);
+
+function actorId(actor: AuthzActor): string {
+  return typeof actor === 'string' ? actor : actor.merchantId;
+}
+
+function actorVia(actor: AuthzActor): AuthVia | null {
+  return typeof actor === 'string' ? null : actor.via ?? null;
+}
 
 function maxRole(a: Role | null, b: Role | null): Role | null {
   if (!a) return b;
@@ -90,15 +109,24 @@ export async function resolveOrgRole(
   return (om?.role as Role) ?? null;
 }
 
-/** Gate a capability on a business. 404 (not 403) when the user has no access at all. */
+/**
+ * Gate a capability on a business. 404 (not 403) when the user has no access at all.
+ *
+ * An actor that authenticated with an OAuth access token (`via: 'oauth'`) is
+ * refused `funds.move` with 403 `oauth_cannot_move_funds`, even as the owner:
+ * apps signed in with CoinPay cannot move funds.
+ */
 export async function authorizeBusiness(
   supabase: SupabaseClient,
-  userId: string,
+  actor: AuthzActor,
   businessId: string,
   capability: Capability,
 ): Promise<AuthzResult> {
-  const role = await resolveBusinessRole(supabase, userId, businessId);
+  const role = await resolveBusinessRole(supabase, actorId(actor), businessId);
   if (!role) return { ok: false, status: 404, error: 'Business not found' };
+  if (actorVia(actor) === 'oauth' && OAUTH_DENIED_CAPABILITIES.has(capability)) {
+    return { ok: false, status: 403, error: OAUTH_CANNOT_MOVE_FUNDS_MESSAGE, code: OAUTH_CANNOT_MOVE_FUNDS };
+  }
   if (!can(role, capability)) return { ok: false, status: 403, error: 'Insufficient permissions' };
   return { ok: true, role };
 }
@@ -111,11 +139,11 @@ export async function authorizeBusiness(
  */
 export async function authorizeBusinessOwner(
   supabase: SupabaseClient,
-  userId: string,
+  actor: AuthzActor,
   businessId: string,
   capability: Capability,
 ): Promise<{ ok: true; role: Role; ownerId: string } | AuthzErr> {
-  const authz = await authorizeBusiness(supabase, userId, businessId, capability);
+  const authz = await authorizeBusiness(supabase, actor, businessId, capability);
   if (!authz.ok) return authz;
   const { data } = await supabase
     .from('businesses')

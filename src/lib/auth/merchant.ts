@@ -6,6 +6,12 @@ import { isApiKey, getBusinessByApiKey } from '@/lib/auth/apikey';
 export type ResolvedMerchant = {
   merchantId: string;
   apiKeyBusinessId: string | null;
+  /**
+   * How the caller authenticated. 'oauth' (only possible with `allowOAuth`)
+   * cannot move funds: pass `{ merchantId, via }` to `authorizeBusiness` and
+   * `funds.move` is refused. See ./oauth-funds.
+   */
+  via: 'api_key' | 'session' | 'oauth';
 };
 
 export type ResolveError = { error: string; status: number };
@@ -66,7 +72,7 @@ export async function resolveMerchant(
   if (auth.kind === 'oauth' && !options.allowOAuth) {
     return { error: 'This endpoint requires a dashboard session or an API key', status: 403 };
   }
-  return { merchantId: auth.merchantId, apiKeyBusinessId: null };
+  return { merchantId: auth.merchantId, apiKeyBusinessId: null, via: auth.kind };
 }
 
 async function resolveApiKey(
@@ -80,6 +86,7 @@ async function resolveApiKey(
   return {
     merchantId: result.business.merchant_id,
     apiKeyBusinessId: result.business.id,
+    via: 'api_key',
   };
 }
 

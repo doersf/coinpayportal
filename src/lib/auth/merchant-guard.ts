@@ -8,6 +8,14 @@ import { merchantFromAccessToken } from './oauth-bearer';
 export type AuthenticatedMerchant = {
   id: string;
   email: string;
+  /**
+   * 'oauth' when the bearer was an OAuth access token with the `merchant`
+   * scope rather than a dashboard session. Such a caller cannot move funds;
+   * see ./oauth-funds.
+   */
+  via: 'session' | 'oauth';
+  /** The OAuth client the token was issued to, when `via` is 'oauth'. */
+  oauthClientId: string | null;
 };
 
 /**
@@ -43,6 +51,8 @@ export async function requireMerchant(
 
   let merchantId: string | undefined;
   let email = '';
+  let via: 'session' | 'oauth' = 'session';
+  let oauthClientId: string | null = null;
   try {
     const decoded = verifyToken(token, secret);
     merchantId = decoded?.userId;
@@ -61,6 +71,8 @@ export async function requireMerchant(
     if (oauth) {
       merchantId = oauth.id;
       email = '';
+      via = 'oauth';
+      oauthClientId = oauth.clientId;
     }
   }
 
@@ -81,7 +93,7 @@ export async function requireMerchant(
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  return { id: merchant.id, email: merchant.email ?? email };
+  return { id: merchant.id, email: merchant.email ?? email, via, oauthClientId };
 }
 
 /**

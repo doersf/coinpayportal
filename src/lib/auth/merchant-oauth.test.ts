@@ -26,13 +26,14 @@ describe('resolveMerchant with OAuth bearers', () => {
 
   it('resolves a session JWT as before', async () => {
     const token = jwt.sign({ userId: 'merchant-9' }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h' });
-    expect(await resolveMerchant(supabase, req(token))).toEqual({ merchantId: 'merchant-9', apiKeyBusinessId: null });
+    expect(await resolveMerchant(supabase, req(token))).toEqual({ merchantId: 'merchant-9', apiKeyBusinessId: null, via: 'session' });
   });
 
   it('maps a merchant-scope OAuth token to its sub when the route opts in', async () => {
     expect(await resolveMerchant(supabase, req(oauth('openid merchant')), { allowOAuth: true })).toEqual({
       merchantId: 'merchant-9',
       apiKeyBusinessId: null,
+      via: 'oauth',
     });
   });
 

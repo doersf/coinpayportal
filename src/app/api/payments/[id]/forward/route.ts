@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { verifyToken } from '@/lib/auth/jwt';
+import { oauthFundsMoveRefusalBody } from '@/lib/auth/oauth-funds';
 import { getForwardingStatus } from '@/lib/payments/forwarding';
 import { forwardPaymentSecurely, retryForwardingSecurely } from '@/lib/wallets/secure-forwarding';
 import { getJwtSecret, getSecret } from '@/lib/secrets';
@@ -53,6 +54,13 @@ export async function POST(
           { success: false, error: 'Invalid token' },
           { status: 401 }
         );
+      }
+
+      // An OAuth access token (signed with JWT_SECRET when OIDC_SIGNING_SECRET
+      // is unset) carries the user in `sub`, which this check reads. Apps
+      // signed in with CoinPay cannot move funds, so refuse it here.
+      if (payload.token_type === 'access') {
+        return NextResponse.json(oauthFundsMoveRefusalBody(), { status: 403 });
       }
 
       // Verify admin access
