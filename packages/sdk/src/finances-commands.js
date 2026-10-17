@@ -891,10 +891,21 @@ export async function runFinancesCommand(subcommand, args, flags, ctx) {
         const action = flags.off ? 'off' : args[0] || 'show';
         const describe = (s) => s
           ? `Daily summary ${s.active ? 'on' : 'off'} · ${String(s.hour).padStart(2, '0')}:00 ${s.timezone} · to ${s.recipients.join(', ')}${s.nextRunAt ? ` · next ${s.nextRunAt}` : ''}${s.lastSentAt ? ` · last ${s.lastSentAt}` : ''}`
-          : 'No daily summary configured. Turn it on with: coinpay finances daily on --hour 7 --to you@example.com';
+          : 'No daily summary configured. Turn it on with: coinpay finances daily on --hour 7';
+        const targetText = (t) => (t === null || t === undefined ? 'no daily spend target' : `target $${t}/day`);
+        if (flags.target !== undefined) {
+          const raw = String(flags.target);
+          const target = ['off', 'clear', 'none'].includes(raw) ? null : Number(raw.replace(/^\$/, ''));
+          if (target !== null && (!Number.isFinite(target) || target < 0)) throw new CliExit(EXIT.INVALID, 'The target is a daily amount, e.g. --target 100, or --target clear');
+          const data = await api.setDailySpendTarget(client, target);
+          if (action === 'show') {
+            emit({ schedule: data.schedule, target: data.target }, `${describe(data.schedule)}\n${target === null ? 'Cleared the daily spend target.' : `Daily spend target set to $${data.target}/day.`}`);
+            return EXIT.OK;
+          }
+        }
         if (action === 'show') {
-          const s = await api.getDailySummary(client);
-          emit({ schedule: s }, describe(s));
+          const { schedule: s, target } = await api.getDailySummaryWithTarget(client);
+          emit({ schedule: s, target }, `${describe(s)} · ${targetText(target)}`);
           return EXIT.OK;
         }
         if (action === 'on' || action === 'set') {
@@ -917,7 +928,7 @@ export async function runFinancesCommand(subcommand, args, flags, ctx) {
           emit(data, `Sent to ${data.sent.join(', ') || 'nobody'} (${data.due} due, ${data.overdue} overdue)${data.failed.length ? `; failed: ${data.failed.map((f) => `${f.to} (${f.error})`).join(', ')}` : ''}`);
           return data.sent.length > 0 ? EXIT.OK : EXIT.FAILURE;
         }
-        throw new CliExit(EXIT.INVALID, 'Usage: coinpay finances daily [show|on --hour 7 --to a@x|off|send-now]');
+        throw new CliExit(EXIT.INVALID, 'Usage: coinpay finances daily [show|on --hour 7 --to a@x|off|send-now] [--target 100|--target clear]');
       }
 
       case 'payloads': {

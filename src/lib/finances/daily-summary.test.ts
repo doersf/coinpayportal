@@ -52,6 +52,8 @@ describe('daily summary email', () => {
       started: [{ key: 'charge:linear app', payee: 'Linear App', cadence: 'monthly', amount: 40, monthly: 40, lastSeen: '2026-10-01T12:00:00.000Z', nextExpected: '2026-10-31T12:00:00.000Z', accountName: 'Amex' }],
       missed: [],
       topVendors: [{ name: 'Costco Wholesale', spent: 180, count: 1 }],
+      perDay: 10.43,
+      cuts: [],
     };
     const withSpend = { ...input(), spend };
     expect(dailySummarySubject(withSpend)).toBe('CoinPay daily summary 2026-10-12: 1 overdue, 1 due today, $423.94 due in 7 days, spent $312.99 in 30d (-34%)');

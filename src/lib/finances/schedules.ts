@@ -12,8 +12,11 @@ import { audit } from './audit';
  * - `weekly_digest` sends the previous seven days of the books (totals by
  *   tax category, unreviewed count, the CPA pack attached).
  * - `daily_summary` sends what is due and overdue across every account,
- *   the recurring charges, what was imported since the last one, and the
- *   balance sheet (`daily-summary.ts`). No attachments.
+ *   the recurring charges, what was imported since the last one, spend
+ *   against the owner's daily target, top cuts, and the balance sheet
+ *   (`daily-summary.ts`). No attachments. On by default for every merchant
+ *   with a linked connection (`daily-subscriptions.ts`), with a one-click
+ *   unsubscribe in every email.
  *
  * The worker turns a due row into an `email_report` job. Days and the hour
  * are in the merchant's finance timezone; the next run is computed from
@@ -152,12 +155,25 @@ export async function upsertSchedule(
     .select(COLUMNS)
     .single();
   if (error) throw new Error(`Could not save the schedule: ${error.message}`);
+  // The owner's own choice about the daily summary is the only thing that
+  // overrides an earlier opt-out, either way.
+  if (kind === 'daily_summary') {
+    const { clearDailySummaryOptOut, recordDailySummaryOptOut } = await import('./daily-subscriptions');
+    if (active) await clearDailySummaryOptOut(merchantId);
+    else await recordDailySummaryOptOut(merchantId);
+  }
   await audit(merchantId, 'email_schedule.save', 'schedule', (data as EmailScheduleRow).id, { kind, weekdays: weekdays.join(','), hour, active, recipients: recipients.length });
   return data as EmailScheduleRow;
 }
 
 export async function deleteSchedule(merchantId: string, kind: ScheduleKind = 'weekly_digest'): Promise<boolean> {
   const supabase = getSupabaseAdmin();
+  // Turning the daily summary off is an opt-out: recorded first, so the
+  // default-subscribe backfill never puts it back.
+  if (kind === 'daily_summary') {
+    const { recordDailySummaryOptOut } = await import('./daily-subscriptions');
+    await recordDailySummaryOptOut(merchantId);
+  }
   const { data, error } = await supabase.from('finance_email_schedules').delete().eq('merchant_id', merchantId).eq('kind', kind).select('id');
   if (error) throw new Error(`Could not delete the schedule: ${error.message}`);
   return (data ?? []).length > 0;
@@ -310,7 +326,15 @@ export async function sendDailySummary(schedule: EmailScheduleRow, now: Date = n
     },
     appUrl: appBaseUrl(),
     spend: undefined as import('./spend-trend').SpendTrend | undefined,
+    target: null as number | null,
+    unsubscribeUrl: undefined as string | undefined,
   };
+  try {
+    const { getEmailPreferences } = await import('./daily-subscriptions');
+    input.target = (await getEmailPreferences(schedule.merchant_id))?.daily_spend_target ?? null;
+  } catch (error) {
+    console.warn('[finances] daily summary: spend target unavailable', error instanceof Error ? error.message : error);
+  }
   // Spend & cuts is extra: if it cannot be built tonight, the summary still goes out without it.
   try {
     const { loadSpendTrend } = await import('./spend-trend-load');
@@ -319,12 +343,20 @@ export async function sendDailySummary(schedule: EmailScheduleRow, now: Date = n
     console.warn('[finances] daily summary: spend trend unavailable', error instanceof Error ? error.message : error);
   }
   const subject = dailySummarySubject(input);
-  const html = renderDailySummaryHtml(input);
+  const { signUnsubscribe } = await import('./unsubscribe-token');
 
   const sent: string[] = [];
   const failed: Array<{ to: string; error: string }> = [];
   for (const to of schedule.recipients) {
-    const result = await sendEmail({ to, subject, html });
+    // Each recipient gets their own signed link: it removes that address only.
+    const unsubscribeUrl = `${input.appUrl.replace(/\/$/, '')}/api/finances/unsubscribe?t=${signUnsubscribe({ merchantId: schedule.merchant_id, kind: 'daily_summary', email: to })}`;
+    const html = renderDailySummaryHtml({ ...input, unsubscribeUrl });
+    const result = await sendEmail({
+      to,
+      subject,
+      html,
+      headers: { 'List-Unsubscribe': `<${unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+    });
     if (result.success) sent.push(to);
     else failed.push({ to, error: result.error ?? 'send failed' });
   }

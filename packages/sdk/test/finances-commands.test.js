@@ -205,3 +205,31 @@ describe('unknown subcommand', () => {
     vi.restoreAllMocks();
   });
 });
+
+describe('finances daily --target', () => {
+  const schedule = { active: true, hour: 7, timezone: 'America/Los_Angeles', recipients: ['me@example.com'], nextRunAt: null, lastSentAt: null };
+
+  it('sets the $/day target without turning the summary on', async () => {
+    const client = fakeClient({ 'POST /finances/email-schedules': (_p, o) => ({ schedule, dailySpendTarget: JSON.parse(o.body).target }) });
+    const { ctx, out } = ctxFor(client);
+    expect(await runFinancesCommand('daily', [], { target: '100' }, ctx)).toBe(EXIT.OK);
+    expect(JSON.parse(client.calls[0].options.body)).toEqual({ kind: 'daily_summary', target: 100 });
+    expect(out.join('\n')).toMatch(/target set to \$100\/day/);
+  });
+
+  it('clears it, and rejects a bare or negative --target', async () => {
+    const client = fakeClient({ 'POST /finances/email-schedules': (_p, o) => ({ schedule, dailySpendTarget: JSON.parse(o.body).target }) });
+    const { ctx } = ctxFor(client);
+    expect(await runFinancesCommand('daily', [], { target: 'clear' }, ctx)).toBe(EXIT.OK);
+    expect(JSON.parse(client.calls[0].options.body).target).toBeNull();
+    expect(await runFinancesCommand('daily', [], { target: true }, ctx)).toBe(EXIT.INVALID);
+    expect(await runFinancesCommand('daily', [], { target: '-5' }, ctx)).toBe(EXIT.INVALID);
+  });
+
+  it('shows the target with the schedule', async () => {
+    const client = fakeClient({ 'GET /finances/email-schedules': () => ({ schedule, dailySpendTarget: 100 }) });
+    const { ctx, out } = ctxFor(client);
+    expect(await runFinancesCommand('daily', [], {}, ctx)).toBe(EXIT.OK);
+    expect(out.join('\n')).toMatch(/target \$100\/day/);
+  });
+});

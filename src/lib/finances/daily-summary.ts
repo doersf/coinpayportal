@@ -36,6 +36,10 @@ export interface DailySummaryInput {
   appUrl: string;
   /** Spend & cuts: the 30-day trend and what recurring changed. Omitted when it could not be built. */
   spend?: SpendTrend;
+  /** The owner's $/day spend target; null or omitted when none is set. */
+  target?: number | null;
+  /** This recipient's signed one-click unsubscribe link. */
+  unsubscribeUrl?: string;
 }
 
 const C = {
@@ -88,10 +92,58 @@ export function renderSpendBlock(spend: SpendTrend, currency: string | null): st
   return `<h3 style="font-size:14px;margin:18px 0 6px">Spend &amp; cuts</h3>
 <p style="margin:0 0 4px;font-size:13px">Spent <strong>${escapeHtml(money(spend.spent, currency))}</strong> in the last ${spend.windowDays} days, ${trend}.</p>
 <p style="margin:0 0 4px;font-size:13px">Recurring bills and subscriptions: <strong>${escapeHtml(money(spend.runRate, currency))}/mo</strong>, ${delta === 0 ? 'unchanged' : `<strong style="color:${delta < 0 ? C.paid : C.overdue}">${delta < 0 ? '−' : '+'}${escapeHtml(money(Math.abs(delta), currency))}/mo</strong>`} from a month ago.</p>
-<p style="margin:0 0 6px;font-size:11px;color:${C.muted}">Net of refunds; transfers, card payments, investments and debt payments left out.</p>
+<p style="margin:0 0 6px;font-size:11px;color:${C.muted}">Net of refunds; transfers, card payments, investments, income and debt payments left out. Fees and interest count.</p>
+${renderCutsBlock(spend, currency)}
 ${stopped}
 ${started}
 ${vendors}`;
+}
+
+/** A target worth suggesting: 10% under the current rate, in round dollars ($5 steps above $50). */
+export function suggestTarget(perDay: number): number | null {
+  if (!(perDay > 1)) return null;
+  const aim = perDay * 0.9;
+  return aim >= 50 ? Math.floor(aim / 5) * 5 : Math.max(1, Math.floor(aim));
+}
+
+/**
+ * The top line: "Spent $X/day over the last 30 days. Target $T/day. You're
+ * $D/day over." Without a target, the rate and a suggested one. Plain text,
+ * so it can be tested and reused in other surfaces.
+ */
+export function spendTargetLine(spend: Pick<SpendTrend, 'perDay' | 'windowDays'>, target: number | null | undefined, currency: string | null): string {
+  const rate = `Spent ${money(spend.perDay, currency)}/day over the last ${spend.windowDays} days.`;
+  if (target === null || target === undefined) {
+    const suggestion = suggestTarget(spend.perDay);
+    return suggestion === null
+      ? `${rate} No daily target set.`
+      : `${rate} No daily target set; try ${money(suggestion, currency)}/day: coinpay finances daily --target ${suggestion}`;
+  }
+  const diff = Math.round((spend.perDay - target) * 100) / 100;
+  const verdict = diff === 0 ? "You're right on target." : `You're ${money(Math.abs(diff), currency)}/day ${diff > 0 ? 'over' : 'under'}.`;
+  return `${rate} Target ${money(target, currency)}/day. ${verdict}`;
+}
+
+function renderTargetLine(spend: SpendTrend, target: number | null | undefined, currency: string | null): string {
+  const line = escapeHtml(spendTargetLine(spend, target, currency));
+  const over = target !== null && target !== undefined && spend.perDay > target;
+  const under = target !== null && target !== undefined && spend.perDay <= target;
+  const color = over ? C.overdue : under ? C.paid : C.text;
+  return `<p style="margin:0 0 12px;font-size:15px;font-weight:600;color:${color}">${line.replace(/coinpay finances daily --target (\d+)/, '<code>coinpay finances daily --target $1</code>')}</p>`;
+}
+
+/** Top cuts: what to cancel, and the fees and interest to stop paying. */
+export function renderCutsBlock(spend: SpendTrend, currency: string | null): string {
+  if (!spend.cuts?.length) return '';
+  const rows = spend.cuts
+    .map((c) => {
+      const fee = c.kind !== 'recurring';
+      return `<tr><td style="padding:4px 8px;border-bottom:1px solid ${C.rule}">${fee ? `<strong style="color:${C.overdue}">` : ''}${escapeHtml(c.payee)}${fee ? '</strong>' : ''}<div style="font-size:11px;color:${C.muted}">${escapeHtml(c.accountName)} · ${escapeHtml(c.note)}</div></td>
+<td style="padding:4px 8px;border-bottom:1px solid ${C.rule};text-align:right;white-space:nowrap">${escapeHtml(money(c.monthly, currency))}/mo</td></tr>`;
+    })
+    .join('\n');
+  return `<h4 style="font-size:13px;margin:12px 0 4px">Top cuts</h4>
+<p style="margin:0 0 4px;font-size:11px;color:${C.muted}">The biggest recurring charges you could cancel, and fees and interest you paid lately (red). Loan and card payments are not listed.</p>${table(rows)}`;
 }
 
 /** "Today", "Tomorrow", "Yesterday", "3 days late" or "Wed Oct 14". */
@@ -117,7 +169,13 @@ export function dailySummarySubject(input: DailySummaryInput): string {
   if (overdue) parts.push(`${overdue} overdue`);
   if (today) parts.push(`${today} due today`);
   parts.push(`${money(due.totals.due, input.position.currency)} due in ${due.horizonDays} days`);
-  if (input.spend) parts.push(`spent ${money(input.spend.spent, input.position.currency)} in ${input.spend.windowDays}d${input.spend.change === null ? '' : ` (${percent(input.spend.change)})`}`);
+  if (input.spend) {
+    const cur = input.position.currency;
+    parts.push(`spent ${money(input.spend.spent, cur)} in ${input.spend.windowDays}d${input.spend.change === null ? '' : ` (${percent(input.spend.change)})`}`);
+    if (input.target !== null && input.target !== undefined && input.spend.perDay !== undefined) {
+      parts.push(`${money(input.spend.perDay, cur)}/day vs ${money(input.target, cur)} target`);
+    }
+  }
   return `CoinPay daily summary ${due.today}: ${parts.join(', ')}`;
 }
 
@@ -203,6 +261,7 @@ ${
   return `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:${C.text};max-width:640px">
 <h2 style="margin:0 0 4px">Daily summary</h2>
 <p style="margin:0 0 12px;color:${C.muted};font-size:13px">${escapeHtml(due.today)} · ${escapeHtml(due.timezone)} · every linked account, business and personal</p>
+${input.spend ? renderTargetLine(input.spend, input.target, cur) : ''}
 ${headline}
 ${spendBlock}
 ${overdueBlock}
@@ -213,6 +272,6 @@ ${missedBlock}
 ${activityBlock}
 ${positionBlock}
 <p style="margin:18px 0 4px;font-size:13px"><a href="${escapeHtml(base)}/finances">Open Finances</a></p>
-<p style="font-size:11px;color:${C.muted};margin:8px 0 0">Projected dates come from each charge's past cadence and run a day or two early against when banks post. Statement due days are the ones set on each account. Sent by CoinPay because a daily summary is scheduled on this account; turn it off with <code>coinpay finances daily --off</code> or DELETE /api/finances/email-schedules?kind=daily_summary.</p>
+<p style="font-size:11px;color:${C.muted};margin:8px 0 0">Projected dates come from each charge's past cadence and run a day or two early against when banks post. Statement due days are the ones set on each account. Sent by CoinPay to this account's owner about this account's own linked banks and cards; every account with a linked bank or card gets one. ${input.unsubscribeUrl ? `<a href="${escapeHtml(input.unsubscribeUrl)}" style="color:${C.muted}">Unsubscribe</a> in one click, or turn` : 'Turn'} it off with <code>coinpay finances daily off</code>. Set a daily target with <code>coinpay finances daily --target 100</code>.</p>
 </div>`;
 }
