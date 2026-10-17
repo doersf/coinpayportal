@@ -154,7 +154,7 @@ export interface FinanceSummary {
  * Without this, every aggregate would silently describe only the first 1000
  * rows — which reads as a working feature right up until the data outgrows it.
  */
-async function fetchAllRows<T>(
+export async function fetchAllRows<T>(
   build: () => ReturnType<ReturnType<typeof getSupabaseAdmin>['from']>,
   { max = MAX_AGGREGATE_ROWS }: { max?: number } = {},
 ): Promise<T[]> {

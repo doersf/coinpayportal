@@ -1,5 +1,6 @@
 import { escapeHtml } from './render';
 import type { DueItem, DueSoon } from './due-soon';
+import type { SpendTrend } from './spend-trend';
 
 /**
  * The daily summary email: what is due, what is overdue, what arrived since
@@ -33,6 +34,8 @@ export interface DailySummaryInput {
   activity: DailyActivity;
   position: DailyPosition;
   appUrl: string;
+  /** Spend & cuts: the 30-day trend and what recurring changed. Omitted when it could not be built. */
+  spend?: SpendTrend;
 }
 
 const C = {
@@ -54,6 +57,41 @@ export function money(amount: number, currency: string | null = 'USD'): string {
   } catch {
     return `${code} ${amount.toFixed(2)}`;
   }
+}
+
+/** A signed whole percentage: "-12%", "+4%", "0%". */
+export function percent(change: number): string {
+  const rounded = Math.round(change * 100);
+  return `${rounded > 0 ? '+' : ''}${rounded}%`;
+}
+
+/**
+ * Spend & cuts. Down is good here, so a falling figure is green and a rising
+ * one red; the reader is cutting costs and wants to see it land.
+ */
+export function renderSpendBlock(spend: SpendTrend, currency: string | null): string {
+  const delta = spend.runRate - spend.runRateBefore;
+  const trend = spend.change === null
+    ? `<span style="color:${C.muted}">nothing to compare against yet</span>`
+    : `<strong style="color:${spend.change <= 0 ? C.paid : C.overdue}">${spend.change <= 0 ? 'down' : 'up'} ${escapeHtml(percent(Math.abs(spend.change)).replace('+', ''))}</strong> from ${escapeHtml(money(spend.previous, currency))} the ${spend.windowDays} days before`;
+  const row = (c: SpendTrend['stopped'][number], note: string) => `<tr><td style="padding:4px 8px;border-bottom:1px solid ${C.rule}">${escapeHtml(c.payee)}<div style="font-size:11px;color:${C.muted}">${escapeHtml(c.accountName)} · ${escapeHtml(c.cadence)} · ${escapeHtml(note)}</div></td>
+<td style="padding:4px 8px;border-bottom:1px solid ${C.rule};text-align:right;white-space:nowrap">${escapeHtml(money(c.monthly, currency))}/mo</td></tr>`;
+  const stopped = spend.stopped.length
+    ? `<h4 style="font-size:13px;margin:12px 0 4px;color:${C.paid}">Stopped: saving ${escapeHtml(money(spend.stopped.reduce((s, c) => s + c.monthly, 0), currency))}/mo</h4>${table(spend.stopped.map((c) => row(c, `last charged ${c.lastSeen.slice(0, 10)}`)).join('\n'))}`
+    : '';
+  const started = spend.started.length
+    ? `<h4 style="font-size:13px;margin:12px 0 4px;color:${C.overdue}">Started: adding ${escapeHtml(money(spend.started.reduce((s, c) => s + c.monthly, 0), currency))}/mo</h4>${table(spend.started.map((c) => row(c, `since about ${c.lastSeen.slice(0, 10)}`)).join('\n'))}`
+    : '';
+  const vendors = spend.topVendors.length
+    ? `<h4 style="font-size:13px;margin:12px 0 4px">Where it went (${spend.windowDays} days)</h4>${table(spend.topVendors.map((v) => `<tr><td style="padding:3px 8px;border-bottom:1px solid ${C.rule}">${escapeHtml(v.name)}<span style="color:${C.muted};font-size:11px"> · ${v.count}×</span></td><td style="padding:3px 8px;border-bottom:1px solid ${C.rule};text-align:right">${escapeHtml(money(v.spent, currency))}</td></tr>`).join('\n'))}`
+    : '';
+  return `<h3 style="font-size:14px;margin:18px 0 6px">Spend &amp; cuts</h3>
+<p style="margin:0 0 4px;font-size:13px">Spent <strong>${escapeHtml(money(spend.spent, currency))}</strong> in the last ${spend.windowDays} days, ${trend}.</p>
+<p style="margin:0 0 4px;font-size:13px">Recurring bills and subscriptions: <strong>${escapeHtml(money(spend.runRate, currency))}/mo</strong>, ${delta === 0 ? 'unchanged' : `<strong style="color:${delta < 0 ? C.paid : C.overdue}">${delta < 0 ? '−' : '+'}${escapeHtml(money(Math.abs(delta), currency))}/mo</strong>`} from a month ago.</p>
+<p style="margin:0 0 6px;font-size:11px;color:${C.muted}">Net of refunds; transfers, card payments, investments and debt payments left out.</p>
+${stopped}
+${started}
+${vendors}`;
 }
 
 /** "Today", "Tomorrow", "Yesterday", "3 days late" or "Wed Oct 14". */
@@ -79,6 +117,7 @@ export function dailySummarySubject(input: DailySummaryInput): string {
   if (overdue) parts.push(`${overdue} overdue`);
   if (today) parts.push(`${today} due today`);
   parts.push(`${money(due.totals.due, input.position.currency)} due in ${due.horizonDays} days`);
+  if (input.spend) parts.push(`spent ${money(input.spend.spent, input.position.currency)} in ${input.spend.windowDays}d${input.spend.change === null ? '' : ` (${percent(input.spend.change)})`}`);
   return `CoinPay daily summary ${due.today}: ${parts.join(', ')}`;
 }
 
@@ -158,11 +197,14 @@ ${
 <tr><td style="padding:2px 12px 2px 0;color:${C.muted}">Recurring</td><td style="text-align:right">${escapeHtml(money(position.recurringMonthly, cur))}/mo across ${position.recurringCount} charges</td></tr>
 </table>`;
 
+  const spendBlock = input.spend ? renderSpendBlock(input.spend, cur) : '';
+
   const base = appUrl.replace(/\/$/, '');
   return `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:${C.text};max-width:640px">
 <h2 style="margin:0 0 4px">Daily summary</h2>
 <p style="margin:0 0 12px;color:${C.muted};font-size:13px">${escapeHtml(due.today)} · ${escapeHtml(due.timezone)} · every linked account, business and personal</p>
 ${headline}
+${spendBlock}
 ${overdueBlock}
 ${upcomingBlock}
 ${awaitingBlock}

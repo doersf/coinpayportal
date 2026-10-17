@@ -3,11 +3,13 @@ import { describe, it, expect } from 'vitest';
 import { dailySummarySubject, renderDailySummaryHtml, whenLabel, type DailySummaryInput } from './daily-summary';
 import { buildDueSoon } from './due-soon';
 import type { RecurringCharge } from './position';
+import type { SpendTrend } from './spend-trend';
 
 const NOW = new Date('2026-10-12T15:00:00.000Z');
 
 function charge(payee: string, amount: number, nextExpected: string): RecurringCharge {
   return {
+    key: `charge:${payee.toLowerCase()}`,
     payee,
     amount,
     cadence: 'monthly',
@@ -37,6 +39,35 @@ function input(): DailySummaryInput {
 }
 
 describe('daily summary email', () => {
+  it('adds Spend & cuts to the subject and the body when the trend is there', () => {
+    const spend: SpendTrend = {
+      currency: 'USD',
+      windowDays: 30,
+      spent: 312.99,
+      previous: 474.98,
+      change: 312.99 / 474.98 - 1,
+      runRate: 74.98,
+      runRateBefore: 294.98,
+      stopped: [{ key: 'charge:equinox gym', payee: 'Equinox <Gym>', cadence: 'monthly', amount: 260, monthly: 260, lastSeen: '2026-08-10T12:00:00.000Z', nextExpected: '2026-09-09T12:00:00.000Z', accountName: 'Chase' }],
+      started: [{ key: 'charge:linear app', payee: 'Linear App', cadence: 'monthly', amount: 40, monthly: 40, lastSeen: '2026-10-01T12:00:00.000Z', nextExpected: '2026-10-31T12:00:00.000Z', accountName: 'Amex' }],
+      missed: [],
+      topVendors: [{ name: 'Costco Wholesale', spent: 180, count: 1 }],
+    };
+    const withSpend = { ...input(), spend };
+    expect(dailySummarySubject(withSpend)).toBe('CoinPay daily summary 2026-10-12: 1 overdue, 1 due today, $423.94 due in 7 days, spent $312.99 in 30d (-34%)');
+    const html = renderDailySummaryHtml(withSpend);
+    expect(html).toContain('Spend &amp; cuts');
+    expect(html).toContain('down 34%');
+    expect(html).toContain('−$220.00/mo');
+    expect(html).toContain('Stopped: saving $260.00/mo');
+    expect(html).toContain('Equinox &lt;Gym&gt;');
+    expect(html).not.toContain('Equinox <Gym>');
+    expect(html).toContain('Started: adding $40.00/mo');
+    expect(html).toContain('Costco Wholesale');
+    // Without it the email is exactly what it was.
+    expect(renderDailySummaryHtml(input())).not.toContain('Spend &amp; cuts');
+  });
+
   it('leads the subject with what needs action', () => {
     expect(dailySummarySubject(input())).toBe('CoinPay daily summary 2026-10-12: 1 overdue, 1 due today, $423.94 due in 7 days');
   });

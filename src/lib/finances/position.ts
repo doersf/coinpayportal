@@ -145,6 +145,12 @@ export interface DebtAccount {
 }
 
 export interface RecurringCharge {
+  /**
+   * The series' identity: its side (`charge:` or `debt:`) and normalised payee.
+   * Stable across runs, so two snapshots can be diffed for charges that
+   * started or stopped; `payee` is display text and may vary between them.
+   */
+  key: string;
   payee: string;
   /** Median amount, stated positive for a debit. */
   amount: number;
@@ -377,6 +383,7 @@ function detectRecurring(rows: RecurrenceRow[], now: Date): RecurringCharge[] {
     if (now.getTime() - lastTime > intervalDays * 2 * 86_400_000) continue;
 
     charges.push({
+      key: groupKey,
       payee: (last.tx.payee || last.tx.description || key).slice(0, 40),
       amount: round2(typicalAmount),
       cadence: cadence.name,
