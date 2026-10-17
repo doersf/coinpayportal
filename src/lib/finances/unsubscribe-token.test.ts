@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import { randomBytes } from 'crypto';
 import { signUnsubscribe, verifyUnsubscribe, unsubscribeSecret } from './unsubscribe-token';
 
-const SECRET = 'test-secret-'.padEnd(48, 'x');
+// Generated per run: no key material in the repo.
+const SECRET = randomBytes(32).toString('hex');
 const claim = { merchantId: 'merchant-aaa', kind: 'daily_summary' as const, email: 'Alice@Example.com' };
 
 describe('unsubscribe tokens', () => {
@@ -16,7 +18,7 @@ describe('unsubscribe tokens', () => {
     const [, sig] = token.split('.');
     const forged = Buffer.from(JSON.stringify({ m: 'merchant-bbb', k: 'daily_summary', e: 'alice@example.com' })).toString('base64url');
     expect(verifyUnsubscribe(`${forged}.${sig}`, SECRET)).toBeNull();
-    expect(verifyUnsubscribe(token, 'another-secret'.padEnd(48, 'y'))).toBeNull();
+    expect(verifyUnsubscribe(token, randomBytes(32).toString('hex'))).toBeNull();
   });
 
   it('rejects malformed input', () => {
@@ -25,7 +27,7 @@ describe('unsubscribe tokens', () => {
 
   it('derives its key from ENCRYPTION_KEY when no dedicated secret is set, never the key itself', () => {
     const before = { e: process.env.ENCRYPTION_KEY, s: process.env.FINANCE_UNSUBSCRIBE_SECRET };
-    process.env.ENCRYPTION_KEY = '3f9a1c7e5b2d4f60a8e1c3b5d7f90213a4c6e8f0b2d4f6a8c0e2b4d6f8a0c2e4';
+    process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex');
     delete process.env.FINANCE_UNSUBSCRIBE_SECRET;
     try {
       const derived = unsubscribeSecret();

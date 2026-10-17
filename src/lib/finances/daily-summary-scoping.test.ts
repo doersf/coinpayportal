@@ -60,7 +60,7 @@ vi.mock('@/lib/supabase/server', () => ({
   }),
 }));
 
-process.env.FINANCE_UNSUBSCRIBE_SECRET = 'scoping-test-secret'.padEnd(48, 'z');
+process.env.FINANCE_UNSUBSCRIBE_SECRET = (await import('crypto')).randomBytes(32).toString('hex');
 const { sendDailySummary } = await import('./schedules');
 const { verifyUnsubscribe } = await import('./unsubscribe-token');
 
