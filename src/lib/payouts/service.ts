@@ -74,7 +74,7 @@ function baseCryptoSymbol(crypto: string): string {
  * Basic wallet address format validation.
  * Does not guarantee on-chain validity but catches obvious mistakes.
  */
-function isPlausibleWalletAddress(address: string, crypto: string): boolean {
+export function isPlausibleWalletAddress(address: string, crypto: string): boolean {
   if (!address || address.length < 20) return false;
 
   const upper = crypto.toUpperCase();

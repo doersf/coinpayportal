@@ -17,6 +17,7 @@ import { getFinanceSummary, listFinanceAccounts, listFinanceTransactions } from 
 import * as sf from './statements-fetch.js';
 import { listInvoices, getInvoice, createInvoice } from './invoices.js';
 import * as projects from './projects.js';
+import * as contractors from './contractors.js';
 
 export const PROTOCOL_VERSION = '2025-06-18';
 
@@ -320,6 +321,68 @@ export const TOOLS = [
     description: "Bill a project's unbilled billable time as a DRAFT itemised invoice (not sent). Returns the invoice number and amount.",
     inputSchema: { type: 'object', properties: { projectId: { type: 'string' } }, required: ['projectId'], additionalProperties: false },
     handler: async (args, { client }) => text(await projects.invoiceProjectTime(client, args.projectId)),
+  },
+  // Contractors. None of these sends money: paying a run is a signed-in owner's act in the dashboard or CLI.
+  {
+    name: 'contractor_list',
+    description: 'List contractors with wallet and tax-form status and how many submissions wait for approval.',
+    inputSchema: { type: 'object', properties: { businessId: { type: 'string' }, includeOffboarded: { type: 'boolean' } }, additionalProperties: false },
+    handler: async (args, { client }) => text({ contractors: await contractors.listContractors(client, args) }),
+  },
+  {
+    name: 'contractor_get',
+    description: 'One contractor: contracts and milestones, work lines and payments.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+    handler: async (args, { client }) => text(await contractors.getContractor(client, args.id)),
+  },
+  {
+    name: 'contractor_work_list',
+    description: 'Contractor work lines (hours, milestones, expenses, bonuses, fixed fees). Use status "submitted" for what waits for approval.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        businessId: { type: 'string' },
+        status: { type: 'string', enum: ['submitted', 'approved', 'rejected', 'paid'] },
+        contractorId: { type: 'string' },
+      },
+      additionalProperties: false,
+    },
+    handler: async (args, { client }) => text({ work_items: await contractors.listWorkItems(client, args) }),
+  },
+  {
+    name: 'contractor_work_review',
+    description: 'Approve or reject a submitted work line. A rejection needs a note the contractor will see. Approving does not pay; it queues the line for the next pay run.',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, action: { type: 'string', enum: ['approve', 'reject'] }, note: { type: 'string' } },
+      required: ['id', 'action'],
+      additionalProperties: false,
+    },
+    handler: async (args, { client }) => text({ work_item: await contractors.reviewWorkItem(client, args.id, args) }),
+  },
+  {
+    name: 'pay_run_list',
+    description: 'Pay runs with totals and how many contractors are paid.',
+    inputSchema: { type: 'object', properties: { businessId: { type: 'string' } }, additionalProperties: false },
+    handler: async (args, { client }) => text({ pay_runs: await contractors.listPayRuns(client, args) }),
+  },
+  {
+    name: 'pay_run_get',
+    description: 'One pay run: per-contractor amounts, lines, status and warnings (missing or recently changed wallets).',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+    handler: async (args, { client }) => text(await contractors.getPayRun(client, args.id)),
+  },
+  {
+    name: 'pay_run_draft',
+    description: 'Draft a pay run from fixed fees due by payDate (YYYY-MM-DD, default today) plus all approved work. Sends nothing; the owner reviews and pays it.',
+    inputSchema: { type: 'object', properties: { businessId: { type: 'string' }, payDate: { type: 'string' } }, additionalProperties: false },
+    handler: async (args, { client }) => text({ pay_run: await contractors.createPayRun(client, args) }),
+  },
+  {
+    name: 'contractor_1099_summary',
+    description: 'Totals paid per contractor in a calendar year and who needs a 1099-NEC (US, $600+, not a corporation). Shows only the last four of tax ids.',
+    inputSchema: { type: 'object', properties: { businessId: { type: 'string' }, year: { type: 'integer' } }, additionalProperties: false },
+    handler: async (args, { client }) => text(await contractors.get1099Summary(client, args)),
   },
 ];
 

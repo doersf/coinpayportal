@@ -160,9 +160,10 @@ const MACHINE_PATHS = /^\/(?:install\.sh$|\.well-known\/)/;
  * Pages a merchant's client opens to see or pay what they owe. A client on a
  * corporate VPN or a cloud desktop sits in a datacenter range like any
  * scraper, and asking them to pay a toll before they can pay an invoice is a
- * lost payment, not a blocked crawler.
+ * lost payment, not a blocked crawler. The same goes for a contractor opening
+ * their portal to get paid.
  */
-const PAYER_PATHS = /^\/(?:invoices\/[^/]+\/pay\/?$|now\/[^/]+\/?$|portal\/[^/]+\/?$|proposals\/respond\/[^/]+\/?$)/;
+const PAYER_PATHS = /^\/(?:contractor\/[^/]+(?:\/invoices\/[^/]+)?\/?$|invoices\/[^/]+\/pay\/?$|now\/[^/]+\/?$|portal\/[^/]+\/?$|proposals\/respond\/[^/]+\/?$)/;
 
 /** The forwarded client address, or null when there is none to judge. */
 export function clientAddress(request: Request): string | null {

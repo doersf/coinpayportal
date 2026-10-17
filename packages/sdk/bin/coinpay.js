@@ -46,6 +46,26 @@ import {
   listTimeEntries,
   invoiceProjectTime,
 } from '../src/projects.js';
+import {
+  listContractors,
+  getContractor,
+  addContractor,
+  createContractorPortalLink,
+  offboardContractor,
+  createContract,
+  sendContract,
+  endContract,
+  listWorkItems,
+  reviewWorkItem,
+  addContractorPayment,
+  listPayRuns,
+  getPayRun,
+  createPayRun,
+  deletePayRun,
+  payPayRun,
+  recordPayRunPayments,
+  get1099Summary,
+} from '../src/contractors.js';
 import { readFileSync, writeFileSync, existsSync, unlinkSync, chmodSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 import { createInterface } from 'readline';
@@ -499,6 +519,28 @@ ${colors.cyan}Commands:${colors.reset}
   ${colors.bright}client${colors.reset}
     portal-link <client-id>   Create a portal link listing all their invoices
                               (replaces the old link; --revoke to turn it off)
+
+  ${colors.bright}contractor${colors.reset}
+    list                  Contractors (--business-id, --all includes offboarded)
+    add                   --name, --email [--country US] [--title] [--no-invite]
+    get <id>              Wallet, tax form, contracts and work lines
+    link <id>             New portal link (--email to send it)
+    contract <id>         Draft: --title --kind fixed|hourly --rate 2000 [--frequency monthly]
+    send <contract-id>    Sign as the business and send: --signature "Your Name"
+    end <contract-id>     [--reason] [--end YYYY-MM-DD]
+    pending               Work waiting for approval
+    approve <id>...       Approve work lines; reject <id> --note "why"
+    bonus | expense       --contract <id> --amount 250 --description "..."
+    1099                  Totals and who needs a 1099-NEC (--year 2026)
+    offboard <id>         End contracts and revoke the portal link
+
+  ${colors.bright}payrun${colors.reset}
+    list                  Pay runs
+    create                Draft from fixed fees due + approved work [--date YYYY-MM-DD]
+    get <id>              Per-contractor amounts, lines and warnings
+    pay <id> --yes        Send from the business payout wallet (owner login only)
+    record <id>           You paid yourself: --item <item-id> --tx <hash>
+    delete <id>           Discard a draft
 
   ${colors.bright}project${colors.reset}
     list                  Projects (--business-id, --archived)
@@ -1226,6 +1268,200 @@ async function handleClientCommand(subcommand, args, flags) {
 
 function hoursOf(minutes) {
   return minutes == null ? 'running' : Math.floor(minutes / 60) + 'h' + String(minutes % 60).padStart(2, '0') + 'm';
+}
+
+const usdText = (n) => '$' + Number(n).toFixed(2);
+
+function usageExit(usage) {
+  print.error('Usage: ' + usage);
+  process.exit(1);
+}
+
+async function handleContractor(subcommand, args, flags) {
+  const client = createClient();
+  requireFlagValues(flags, ['business-id', 'name', 'email', 'country', 'title', 'kind', 'rate', 'frequency', 'start', 'end', 'note', 'signature', 'reason', 'amount', 'contract', 'description', 'status', 'year']);
+  switch (subcommand) {
+    case 'list': {
+      const rows = await listContractors(client, { businessId: flags['business-id'], includeOffboarded: !!flags.all });
+      if (flags.json) return print.json(rows);
+      if (!rows.length) return print.info('No contractors');
+      for (const c of rows) {
+        const bits = [c.status, c.payout_currency || 'no wallet', c.tax_form ? c.tax_form + ' ' + c.tax_status : 'no tax form'];
+        if (c.pending_approvals) bits.push(c.pending_approvals + ' to approve');
+        print.info(c.id + '  ' + c.name + ' <' + c.email + '>  ' + bits.join(' · '));
+      }
+      return;
+    }
+    case 'add': {
+      if (!flags.name || !flags.email) usageExit('coinpay contractor add --name "Ada" --email ada@example.com [--country US] [--no-invite]');
+      const result = await addContractor(client, {
+        businessId: flags['business-id'],
+        name: flags.name,
+        email: flags.email,
+        country: flags.country?.toUpperCase(),
+        jobTitle: flags.title,
+        sendInvite: !flags['no-invite'],
+      });
+      if (flags.json) return print.json(result);
+      print.success('Contractor added: ' + result.contractor.id + (flags['no-invite'] ? '' : ' (invite emailed)'));
+      return print.info('Portal link: ' + result.portal_url);
+    }
+    case 'get': {
+      if (args.length !== 1) usageExit('coinpay contractor get <id>');
+      const data = await getContractor(client, args[0]);
+      if (flags.json) return print.json(data);
+      const c = data.contractor;
+      print.info(c.name + ' <' + c.email + '>  ' + c.status);
+      print.info('Wallet: ' + (c.payout_wallet ? c.payout_currency + ' ' + c.payout_wallet : 'not set'));
+      print.info('Tax form: ' + (c.tax_form ? c.tax_form + ' ' + c.tax_status + (c.tax_id_last4 ? ' •••' + c.tax_id_last4 : '') : 'missing'));
+      for (const k of data.contracts) {
+        const terms = k.kind === 'fixed' ? usdText(k.rate) + ' ' + k.frequency : k.kind === 'hourly' ? usdText(k.rate) + '/h' : 'milestones';
+        print.info('  contract ' + k.id + '  ' + k.title + '  ' + terms + '  ' + k.status);
+      }
+      for (const w of data.work_items.slice(0, 20)) print.info('  ' + w.work_date + '  ' + w.kind + '  ' + usdText(w.amount) + '  ' + w.status + '  ' + w.id);
+      return;
+    }
+    case 'link': {
+      if (args.length !== 1) usageExit('coinpay contractor link <id> [--email]');
+      const url = await createContractorPortalLink(client, args[0], { sendEmail: !!flags.email });
+      return flags.json ? print.json({ url }) : print.info(url);
+    }
+    case 'offboard': {
+      if (args.length !== 1) usageExit('coinpay contractor offboard <id>');
+      await offboardContractor(client, args[0]);
+      return print.success('Offboarded');
+    }
+    case 'contract': {
+      if (args.length !== 1 || !flags.title || !flags.kind) {
+        usageExit('coinpay contractor contract <id> --title "Retainer" --kind fixed|hourly --rate 2000 [--frequency monthly] [--start YYYY-MM-DD]');
+      }
+      if (flags.kind === 'milestone') usageExit('milestone contracts are created in the dashboard (they need a milestone list)');
+      const rate = parseNonNegativeAmount(String(flags.rate ?? ''));
+      if (!rate) usageExit('--rate must be an amount with at most two decimals');
+      const contract = await createContract(client, args[0], {
+        title: flags.title,
+        kind: flags.kind,
+        rate,
+        frequency: flags.frequency,
+        startDate: flags.start,
+        endDate: flags.end,
+      });
+      if (flags.json) return print.json(contract);
+      print.success('Draft contract: ' + contract.id);
+      return print.info('Send it with: coinpay contractor send ' + contract.id + ' --signature "Your Name"');
+    }
+    case 'send': {
+      if (args.length !== 1 || !flags.signature) usageExit('coinpay contractor send <contract-id> --signature "Your Name"');
+      const contract = await sendContract(client, args[0], { signature: flags.signature });
+      return flags.json ? print.json(contract) : print.success('Signed and sent: ' + contract.title);
+    }
+    case 'end': {
+      if (args.length !== 1) usageExit('coinpay contractor end <contract-id> [--reason "..."] [--end YYYY-MM-DD]');
+      const contract = await endContract(client, args[0], { reason: flags.reason, endDate: flags.end });
+      return flags.json ? print.json(contract) : print.success('Contract ended ' + contract.end_date);
+    }
+    case 'pending': {
+      const rows = await listWorkItems(client, { businessId: flags['business-id'], status: flags.status || 'submitted' });
+      if (flags.json) return print.json(rows);
+      if (!rows.length) return print.info('Nothing waiting');
+      for (const w of rows) {
+        print.info(w.id + '  ' + (w.contractors?.name || '') + '  ' + w.kind + (w.minutes ? ' ' + (w.minutes / 60).toFixed(2) + 'h' : '') + '  ' + usdText(w.amount) + '  ' + w.description);
+      }
+      return;
+    }
+    case 'approve':
+    case 'reject': {
+      if (!args.length) usageExit('coinpay contractor ' + subcommand + ' <work-item-id>...' + (subcommand === 'reject' ? ' --note "why"' : ''));
+      for (const workId of args) {
+        const w = await reviewWorkItem(client, workId, { action: subcommand, note: flags.note });
+        print.success((subcommand === 'approve' ? 'Approved ' : 'Rejected ') + w.id + '  ' + usdText(w.amount));
+      }
+      return;
+    }
+    case 'bonus':
+    case 'expense': {
+      if (!flags.contract || !flags.amount || !flags.description) {
+        usageExit('coinpay contractor ' + subcommand + ' --contract <id> --amount 250 --description "..."');
+      }
+      const amount = parseNonNegativeAmount(String(flags.amount));
+      if (!amount) usageExit('--amount must be an amount with at most two decimals');
+      const w = await addContractorPayment(client, { businessId: flags['business-id'], contractId: flags.contract, kind: subcommand, amount, description: flags.description });
+      return flags.json ? print.json(w) : print.success(subcommand + ' added: ' + usdText(w.amount) + ' (goes into the next pay run)');
+    }
+    case '1099': {
+      const year = flags.year ? Number(flags.year) : new Date().getUTCFullYear() - 1;
+      const data = await get1099Summary(client, { businessId: flags['business-id'], year });
+      if (flags.json) return print.json(data);
+      if (!data.contractors.length) return print.info('No contractor payments in ' + year);
+      for (const r of data.contractors) {
+        print.info(String(r.name).padEnd(30) + usdText(r.total_paid).padStart(14) + '  ' + (r.needs_1099_nec ? '1099-NEC' : r.missing_w9 ? 'MISSING W-9' : '-'));
+      }
+      return print.info('Full CSV with tax ids: the Contractors page, Tax forms & 1099 tab (owner only).');
+    }
+    default:
+      usageExit('coinpay contractor <list|add|get|link|offboard|contract|send|end|pending|approve|reject|bonus|expense|1099>');
+  }
+}
+
+async function handlePayRun(subcommand, args, flags) {
+  const client = createClient();
+  requireFlagValues(flags, ['business-id', 'date', 'item', 'tx']);
+  switch (subcommand) {
+    case 'list': {
+      const rows = await listPayRuns(client, { businessId: flags['business-id'] });
+      if (flags.json) return print.json(rows);
+      if (!rows.length) return print.info('No pay runs');
+      for (const r of rows) print.info(r.id + '  #' + r.number + '  ' + r.pay_date + '  ' + usdText(r.total) + '  ' + r.status + '  ' + r.paid + '/' + r.contractors + ' paid');
+      return;
+    }
+    case 'create': {
+      const run = await createPayRun(client, { businessId: flags['business-id'], payDate: flags.date });
+      if (flags.json) return print.json(run);
+      print.success('Drafted pay run #' + run.number + ' for ' + usdText(run.total) + ': ' + run.id);
+      return print.info('Review it with: coinpay payrun get ' + run.id);
+    }
+    case 'get': {
+      if (args.length !== 1) usageExit('coinpay payrun get <id>');
+      const data = await getPayRun(client, args[0]);
+      if (flags.json) return print.json(data);
+      const r = data.pay_run;
+      print.info('Pay run #' + r.number + '  ' + r.pay_date + '  ' + usdText(r.total) + '  ' + r.status);
+      for (const i of data.items) {
+        print.info('  ' + i.id + '  ' + String(i.contractors?.name || '').padEnd(24) + usdText(i.amount).padStart(12) + '  ' + i.status + (i.tx_hash ? '  ' + i.tx_hash : '') + (i.can_send_from_wallet ? '' : '  (pay manually)'));
+        for (const w of i.warnings || []) print.info('      ! ' + w);
+      }
+      return;
+    }
+    case 'pay': {
+      if (args.length !== 1) usageExit('coinpay payrun pay <id> --yes   (sends from the business payout wallet; needs `coinpay login` as the owner)');
+      if (!flags.yes) {
+        print.error('This sends crypto and cannot be undone. Review with `coinpay payrun get ' + args[0] + '`, then add --yes.');
+        process.exit(1);
+      }
+      const result = await payPayRun(client, args[0]);
+      if (flags.json) return print.json(result);
+      for (const o of result.outcomes) {
+        const line = o.contractor + ': ' + o.status + (o.tx_hash ? ' ' + o.tx_hash : '') + (o.error ? ' · ' + o.error : '');
+        if (o.error) print.error(line);
+        else print.success(line);
+      }
+      return print.info('Pay run is ' + result.pay_run.status);
+    }
+    case 'record': {
+      if (args.length !== 1 || !flags.item || !flags.tx) usageExit('coinpay payrun record <id> --item <item-id> --tx <hash>   (you paid from your own wallet)');
+      const result = await recordPayRunPayments(client, args[0], [{ itemId: flags.item, txHash: flags.tx }]);
+      if (flags.json) return print.json(result);
+      const o = result.outcomes[0];
+      return o.error ? print.error(o.error) : print.success('Recorded. Pay run is ' + result.pay_run.status);
+    }
+    case 'delete': {
+      if (args.length !== 1) usageExit('coinpay payrun delete <id>');
+      await deletePayRun(client, args[0]);
+      return print.success('Draft deleted; its lines go back to the approved pool');
+    }
+    default:
+      usageExit('coinpay payrun <list|create|get|pay|record|delete>');
+  }
 }
 
 async function handleProject(subcommand, args, flags) {
@@ -5019,6 +5255,16 @@ async function handleLightning(subcommand, args, flags) {
 
       case 'project':
         await handleProject(subcommand, args, flags);
+        break;
+
+      case 'contractor':
+      case 'contractors':
+        await handleContractor(subcommand, args, flags);
+        break;
+
+      case 'payrun':
+      case 'payruns':
+        await handlePayRun(subcommand, args, flags);
         break;
 
       case 'time':
