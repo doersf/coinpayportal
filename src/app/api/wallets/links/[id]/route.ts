@@ -40,7 +40,7 @@ export async function PATCH(
   try {
     const { id } = await params;
     const supabase = client();
-    const auth = await resolveMerchant(supabase, request);
+    const auth = await resolveMerchant(supabase, request, { allowOAuth: true });
     if ('error' in auth) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
@@ -111,7 +111,7 @@ export async function DELETE(
   try {
     const { id } = await params;
     const supabase = client();
-    const auth = await resolveMerchant(supabase, request);
+    const auth = await resolveMerchant(supabase, request, { allowOAuth: true });
     if ('error' in auth) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }

@@ -1,33 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { verifyToken } from '@/lib/auth/jwt';
+import { resolveMerchantBearer } from '@/lib/auth/bearer';
 import { importWalletsToBusiness } from '@/lib/wallets/merchant-service';
 import type { Cryptocurrency } from '@/lib/wallets/service';
 import { authorizeBusinessOwner } from '@/lib/auth/authz';
-import { getJwtSecret } from '@/lib/secrets';
 
 /**
- * Helper to verify auth and get merchant ID
+ * Verify auth and get the merchant ID: a dashboard session, or an OAuth access
+ * token whose grant carries the `merchant` scope (acting as its `sub`). The
+ * ownership/role check below applies to both alike.
  */
 async function verifyAuth(request: NextRequest) {
-  const authHeader = request.headers.get('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return { error: 'Missing authorization header', status: 401 };
+  const auth = resolveMerchantBearer(request.headers.get('authorization'));
+  if (!auth.ok) {
+    return { error: auth.error, status: auth.status };
   }
-
-  const token = authHeader.substring(7);
-  const jwtSecret = getJwtSecret();
-
-  if (!jwtSecret) {
-    return { error: 'Server configuration error', status: 500 };
-  }
-
-  try {
-    const decoded = verifyToken(token, jwtSecret);
-    return { merchantId: decoded.userId };
-  } catch (error) {
-    return { error: 'Invalid or expired token', status: 401 };
-  }
+  return { merchantId: auth.merchantId };
 }
 
 /**

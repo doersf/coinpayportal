@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getBusiness, updateBusiness, deleteBusiness } from '@/lib/business/service';
-import { verifyToken } from '@/lib/auth/jwt';
-import { getJwtSecret } from '@/lib/secrets';
+import { resolveMerchantBearer } from '@/lib/auth/bearer';
 import { authorizeBusiness } from '@/lib/auth/authz';
 import { can } from '@/lib/auth/permissions';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -18,27 +17,22 @@ async function getOwnerId(supabase: SupabaseClient, businessId: string): Promise
 }
 
 /**
- * Helper to verify auth and get merchant ID
+ * Verify auth and get the merchant ID.
+ *
+ * A dashboard session always works. An OAuth access token with the `merchant`
+ * scope is accepted only where `allowOAuth` is set (PATCH — e.g. an onboarding
+ * app setting webhook_url); reading the full record (API key) and deleting the
+ * business stay dashboard-only. The ownership/role check applies either way.
  */
-async function verifyAuth(request: NextRequest) {
-  const authHeader = request.headers.get('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return { error: 'Missing authorization header', status: 401 };
+async function verifyAuth(request: NextRequest, { allowOAuth = false } = {}) {
+  const auth = resolveMerchantBearer(request.headers.get('authorization'));
+  if (!auth.ok) {
+    return { error: auth.error, status: auth.status };
   }
-
-  const token = authHeader.substring(7);
-  const jwtSecret = getJwtSecret();
-  
-  if (!jwtSecret) {
-    return { error: 'Server configuration error', status: 500 };
+  if (auth.kind === 'oauth' && !allowOAuth) {
+    return { error: 'This endpoint requires a dashboard session', status: 403 };
   }
-
-  try {
-    const decoded = verifyToken(token, jwtSecret);
-    return { merchantId: decoded.userId };
-  } catch (error) {
-    return { error: 'Invalid or expired token', status: 401 };
-  }
+  return { merchantId: auth.merchantId };
 }
 
 /**
@@ -125,7 +119,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const auth = await verifyAuth(request);
+    const auth = await verifyAuth(request, { allowOAuth: true });
     if (auth.error) {
       return NextResponse.json(
         { success: false, error: auth.error },

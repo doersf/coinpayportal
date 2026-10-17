@@ -4,6 +4,7 @@ import { getWebhookSecret, regenerateWebhookSecret } from '@/lib/business/servic
 import { verifyToken } from '@/lib/auth/jwt';
 import { authorizeBusinessOwner } from '@/lib/auth/authz';
 import { getJwtSecret } from '@/lib/secrets';
+import { resolveMerchantBearer, merchantBearerErrorInit } from '@/lib/auth/bearer';
 
 /**
  * GET /api/businesses/:id/webhook-secret
@@ -15,34 +16,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    // Get token from Authorization header
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { success: false, error: 'Missing authorization header' },
-        { status: 401 }
-      );
-    }
-
-    const token = authHeader.substring(7);
-    
-    // Verify token
-    const jwtSecret = getJwtSecret();
-    if (!jwtSecret) {
-      return NextResponse.json(
-        { success: false, error: 'Server configuration error' },
-        { status: 500 }
-      );
-    }
-
-    let decoded;
-    try {
-      decoded = verifyToken(token, jwtSecret);
-    } catch (error) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid or expired token' },
-        { status: 401 }
-      );
+    // A dashboard session, or an OAuth access token with the `merchant` scope
+    // acting as its `sub`; either way the webhook.manage ownership check below
+    // decides. (Regenerating the secret, POST, stays dashboard-only.)
+    const auth = resolveMerchantBearer(request.headers.get('authorization'));
+    if (!auth.ok) {
+      const { body, init } = merchantBearerErrorInit(auth);
+      return NextResponse.json(body, init);
     }
 
     // Create Supabase client
@@ -59,7 +39,7 @@ export async function GET(
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Get webhook secret
-    const authzGet = await authorizeBusinessOwner(supabase, decoded.userId, id, 'webhook.manage');
+    const authzGet = await authorizeBusinessOwner(supabase, auth.merchantId, id, 'webhook.manage');
     if (!authzGet.ok) {
       return NextResponse.json({ success: false, error: authzGet.error }, { status: authzGet.status });
     }

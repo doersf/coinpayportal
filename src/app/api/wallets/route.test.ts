@@ -187,7 +187,29 @@ describe('POST /api/wallets', () => {
     );
   });
 
-  it('refuses OAuth tokens — no scope grants wallet writes', async () => {
+  it('creates a wallet for an OAuth token with the merchant scope, as its sub', async () => {
+    const token = jwt.sign(
+      { sub: 'merchant-9', client_id: 'cp_payagent', scope: 'openid profile email wallet:read merchant', token_type: 'access' },
+      OIDC_SECRET,
+      { algorithm: 'HS256', expiresIn: '1h' }
+    );
+    const res = await POST(
+      makeRequest('https://coinpay.dev/api/wallets', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body,
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(createMerchantWallet).toHaveBeenCalledWith(
+      expect.anything(),
+      'merchant-9',
+      expect.objectContaining({ cryptocurrency: 'BTC' })
+    );
+  });
+
+  it('refuses OAuth tokens without the merchant scope — wallet:read does not grant writes', async () => {
     const res = await POST(
       makeRequest('https://coinpay.dev/api/wallets', {
         method: 'POST',
@@ -200,6 +222,7 @@ describe('POST /api/wallets', () => {
     );
 
     expect(res.status).toBe(403);
+    expect(res.headers.get('WWW-Authenticate')).toContain('scope="merchant"');
     expect(createMerchantWallet).not.toHaveBeenCalled();
   });
 });
