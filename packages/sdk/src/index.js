@@ -107,6 +107,27 @@ import {
   invoiceProjectTime,
 } from './projects.js';
 
+import {
+  listContractors,
+  getContractor,
+  addContractor,
+  createContractorPortalLink,
+  offboardContractor,
+  createContract,
+  sendContract,
+  endContract,
+  listWorkItems,
+  reviewWorkItem,
+  addContractorPayment,
+  listPayRuns,
+  getPayRun,
+  createPayRun,
+  deletePayRun,
+  payPayRun,
+  recordPayRunPayments,
+  get1099Summary,
+} from './contractors.js';
+
 // Wallet exports
 import {
   WalletClient,
@@ -273,6 +294,24 @@ export {
   stopTimer,
   listTimeEntries,
   invoiceProjectTime,
+  listContractors,
+  getContractor,
+  addContractor,
+  createContractorPortalLink,
+  offboardContractor,
+  createContract,
+  sendContract,
+  endContract,
+  listWorkItems,
+  reviewWorkItem,
+  addContractorPayment,
+  listPayRuns,
+  getPayRun,
+  createPayRun,
+  deletePayRun,
+  payPayRun,
+  recordPayRunPayments,
+  get1099Summary,
   
   // Wallet
   WalletClient,

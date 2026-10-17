@@ -5,6 +5,21 @@ All notable changes to `@profullstack/coinpay` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-10-17
+
+### Added
+- Contractors: `coinpay contractor list|add|get|link|offboard|contract|send|end|pending|approve|reject|bonus|expense|1099`.
+  Invite a contractor (they get a private portal to add a payout wallet, file a W-9 or W-8,
+  sign contracts and submit hours, milestones and expenses), contract fixed, hourly or
+  milestone work, approve submissions, and see who needs a 1099-NEC.
+- Pay runs: `coinpay payrun list|create|get|pay|record|delete`. A run collects fixed fees
+  that are due plus approved work, one line per contractor. `pay <id> --yes` sends from the
+  business payout wallet (signed-in owner only); `record` logs a payment made from your own wallet.
+- SDK: `listContractors`, `addContractor`, `createContract`, `sendContract`, `reviewWorkItem`,
+  `createPayRun`, `payPayRun`, `recordPayRunPayments`, `get1099Summary` and friends.
+- MCP: `contractor_list`, `contractor_get`, `contractor_work_list`, `contractor_work_review`,
+  `pay_run_list`, `pay_run_get`, `pay_run_draft`, `contractor_1099_summary`. None of them sends money.
+
 ## [0.18.0] - 2026-10-17
 
 ### Added

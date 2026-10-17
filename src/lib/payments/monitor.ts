@@ -13,6 +13,7 @@ import { runWalletTxCycle } from '../web-wallet/tx-finalize';
 import { primeSolanaBalances, processPayment, type Payment } from './monitor-balance';
 import { runEscrowCycle, runRecurringEscrowCycle } from './monitor-escrow';
 import { runInvoiceMonitorCycle, runInvoiceSchedulerCycle } from './monitor-invoices';
+import { runContractorPayRunScheduler } from '@/lib/contractors/schedule';
 
 // Configuration
 const MONITOR_INTERVAL_MS = parseInt(process.env.MONITOR_INTERVAL_MS || '15000', 10);
@@ -131,6 +132,11 @@ async function runMonitorCycle(): Promise<{ checked: number; confirmed: number; 
     stats.checked += invoiceSchedStats.processed;
     stats.confirmed += invoiceSchedStats.created;
     stats.errors += invoiceSchedStats.errors;
+
+    // ── 7. Contractor pay runs (drafts only; paying is an owner action) ──
+    const payRunStats = await runContractorPayRunScheduler(supabase, now);
+    stats.confirmed += payRunStats.drafted;
+    stats.errors += payRunStats.errors;
 
     if (stats.confirmed > 0 || stats.expired > 0 || stats.errors > 0) {
       console.log(`[Monitor] Cycle: checked=${stats.checked}, confirmed=${stats.confirmed}, expired=${stats.expired}, errors=${stats.errors}`);

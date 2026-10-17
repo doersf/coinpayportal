@@ -159,6 +159,7 @@ export default function Header() {
     { name: 'Explorer', href: '/explorer', primary: true },
     { name: 'API', href: '/docs', primary: true },
     { name: 'Remittance', href: '/remittance' },
+    { name: 'Contractors', href: '/contractors' },
     { name: 'Proposals', href: '/proposals' },
     { name: 'Escrow', href: '/escrow' },
     { name: 'Blog', href: '/blog' },

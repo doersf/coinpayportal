@@ -93,6 +93,27 @@ export {
   invoiceProjectTime,
 } from './projects.js';
 export type { ArAging, AgingRow, InvoiceSettings, Project, ProjectStats, TimeEntry } from './projects.js';
+export {
+  listContractors,
+  getContractor,
+  addContractor,
+  createContractorPortalLink,
+  offboardContractor,
+  createContract,
+  sendContract,
+  endContract,
+  listWorkItems,
+  reviewWorkItem,
+  addContractorPayment,
+  listPayRuns,
+  getPayRun,
+  createPayRun,
+  deletePayRun,
+  payPayRun,
+  recordPayRunPayments,
+  get1099Summary,
+} from './contractors.js';
+export type { Contractor, ContractorContract, ContractorMilestone, ContractorWorkItem, PayRun, PayRunItem, PayOutcome } from './contractors.js';
 
 // Webhook exports
 export {
