@@ -188,6 +188,19 @@ function ClientsTab() {
     setLoading(false);
   };
 
+  const [portalLinks, setPortalLinks] = useState<Record<string, string>>({});
+
+  // A fresh link replaces the old one, so a leaked link is fixed by making a new one.
+  const handlePortalLink = async (id: string) => {
+    const result = await authFetch(`/api/clients/${id}/portal-link`, { method: 'POST' }, router);
+    if (!result?.data.success) {
+      setError(result?.data.error || 'Failed to create portal link');
+      return;
+    }
+    setPortalLinks(links => ({ ...links, [id]: result.data.url }));
+    try { await navigator.clipboard.writeText(result.data.url); } catch { /* shown below to copy by hand */ }
+  };
+
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this client? Invoices referencing this client will not be deleted.')) return;
     setDeleting(id);
@@ -350,7 +363,18 @@ function ClientsTab() {
                   </button>
                 </div>
               </div>
-              <p className="text-xs text-gray-600 mt-3">Added {new Date(client.created_at).toLocaleDateString()}</p>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <p className="text-xs text-gray-600">Added {new Date(client.created_at).toLocaleDateString()}</p>
+                <button onClick={() => handlePortalLink(client.id)} className="text-xs text-purple-400 hover:text-purple-300"
+                  title="Create a link where this client sees all their invoices. Replaces any earlier link.">
+                  {portalLinks[client.id] ? 'New portal link' : 'Portal link'}
+                </button>
+              </div>
+              {portalLinks[client.id] && (
+                <p className="mt-2 text-xs text-green-400 break-all" data-testid="portal-link">
+                  Copied: {portalLinks[client.id]}
+                </p>
+              )}
             </div>
           ))}
         </div>
@@ -397,7 +421,7 @@ function InvoicesPageContent() {
         </div>
 
         {/* Tabs */}
-        <div className="mb-6 flex border-b border-gray-700">
+        <div className="mb-6 flex border-b border-gray-700 overflow-x-auto whitespace-nowrap">
           <button onClick={() => switchTab('invoices')}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'invoices' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-white'}`}>
             Invoices
@@ -409,6 +433,18 @@ function InvoicesPageContent() {
           <Link href="/invoices/catalog"
             className="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-white transition-colors">
             Items &amp; Taxes
+          </Link>
+          <Link href="/invoices/settings"
+            className="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-white transition-colors">
+            Reminders &amp; Branding
+          </Link>
+          <Link href="/projects"
+            className="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-white transition-colors">
+            Projects &amp; Time
+          </Link>
+          <Link href="/invoices/aging"
+            className="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-white transition-colors">
+            Aging
           </Link>
         </div>
 
