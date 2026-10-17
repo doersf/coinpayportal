@@ -82,7 +82,7 @@ export async function PUT(
     if (existing.status === 'draft') {
       if (body.merchant_wallet_address && !access.apiKeyBusinessId) {
         const fundsAuthz = await authorizeBusiness(
-          supabase, access.merchantId, existing.business_id, 'funds.move',
+          supabase, { merchantId: access.merchantId, via: access.via }, existing.business_id, 'funds.move',
         );
         if (!fundsAuthz.ok) {
           return NextResponse.json(

@@ -41,6 +41,12 @@ export interface AuthResult {
   };
   token?: string;
   error?: string;
+  /**
+   * Set by `verifySession`: 'oauth' when the bearer was an OAuth access token
+   * with the `merchant` scope rather than a dashboard session. Such a caller
+   * cannot move funds or read business API keys; see ./oauth-funds.
+   */
+  via?: 'session' | 'oauth';
 }
 
 /**
@@ -277,7 +283,11 @@ export async function verifySession(
     } catch (err) {
       jwtError = err;
     }
-    if (!userId) userId = merchantFromAccessToken(token)?.id ?? null;
+    let via: 'session' | 'oauth' = 'session';
+    if (!userId) {
+      userId = merchantFromAccessToken(token)?.id ?? null;
+      if (userId) via = 'oauth';
+    }
     if (!userId) {
       if (jwtError) throw jwtError;
       return {
@@ -308,6 +318,7 @@ export async function verifySession(
         name: merchant.name,
         is_admin: merchant.is_admin ?? false,
       },
+      via,
     };
   } catch (error) {
     if (error instanceof Error && error.message.includes('expired')) {

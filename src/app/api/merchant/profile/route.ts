@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { verifySession } from '@/lib/auth/service';
+import { withoutApiKeyForOAuth } from '@/lib/auth/oauth-funds';
 import { listBusinesses } from '@/lib/business/service';
 
 function getSupabase() {
@@ -48,7 +49,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       merchant: session.merchant,
-      businesses: businesses.success ? businesses.businesses || [] : [],
+      // No business API key for an app signed in with CoinPay: the key can send payouts.
+      businesses: businesses.success
+        ? (businesses.businesses || []).map((b) => withoutApiKeyForOAuth(b, session))
+        : [],
     });
   } catch (error) {
     console.error('Merchant profile error:', error);

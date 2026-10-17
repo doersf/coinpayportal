@@ -235,7 +235,7 @@ export async function authorizeFundsMove(request: NextRequest, businessId: strin
   if (auth.apiKeyBusinessId) {
     return { ok: false as const, response: fail('Paying a pay run needs a signed-in owner, not an API key', 403) };
   }
-  const authz = await authorizeBusiness(supabase, auth.merchantId, businessId, 'funds.move');
+  const authz = await authorizeBusiness(supabase, { merchantId: auth.merchantId, via: auth.via }, businessId, 'funds.move');
   if (!authz.ok) return { ok: false as const, response: fail(authz.error, authz.status) };
   return { ok: true as const, supabase, merchantId: auth.merchantId };
 }

@@ -39,13 +39,13 @@ describe('requireMerchant', () => {
   it('accepts a merchant JWT from the Authorization header', async () => {
     const token = generateToken({ userId: MERCHANT.id, email: MERCHANT.email }, SECRET);
     const result = await requireMerchant(request({ auth: `Bearer ${token}` }));
-    expect(result).toEqual({ id: MERCHANT.id, email: MERCHANT.email });
+    expect(result).toEqual({ id: MERCHANT.id, email: MERCHANT.email, via: 'session', oauthClientId: null });
   });
 
   it('accepts the same JWT from the token cookie', async () => {
     const token = generateToken({ userId: MERCHANT.id, email: MERCHANT.email }, SECRET);
     const result = await requireMerchant(request({ cookie: token }));
-    expect(result).toEqual({ id: MERCHANT.id, email: MERCHANT.email });
+    expect(result).toEqual({ id: MERCHANT.id, email: MERCHANT.email, via: 'session', oauthClientId: null });
   });
 
   /**
@@ -105,14 +105,14 @@ describe('requireMerchant with an OAuth access token', () => {
   it('accepts a merchant-scoped token signed with the same secret as sessions', async () => {
     const { generateAccessToken } = await import('../oauth/tokens');
     const token = generateAccessToken({ id: MERCHANT.id }, { client_id: 'coinpay-cli' }, ['openid', 'profile', 'email', 'merchant']);
-    expect(await requireMerchant(request({ auth: `Bearer ${token}` }))).toEqual({ id: MERCHANT.id, email: MERCHANT.email });
+    expect(await requireMerchant(request({ auth: `Bearer ${token}` }))).toEqual({ id: MERCHANT.id, email: MERCHANT.email, via: 'oauth', oauthClientId: 'coinpay-cli' });
   });
 
   it('accepts it when signed with a separate OIDC secret too', async () => {
     process.env.OIDC_SIGNING_SECRET = randomBytes(32).toString('hex');
     const { generateAccessToken } = await import('../oauth/tokens');
     const token = generateAccessToken({ id: MERCHANT.id }, { client_id: 'coinpay-cli' }, ['openid', 'merchant']);
-    expect(await requireMerchant(request({ auth: `Bearer ${token}` }))).toEqual({ id: MERCHANT.id, email: MERCHANT.email });
+    expect(await requireMerchant(request({ auth: `Bearer ${token}` }))).toEqual({ id: MERCHANT.id, email: MERCHANT.email, via: 'oauth', oauthClientId: 'coinpay-cli' });
   });
 
   it('refuses a token without the merchant scope, and never from a cookie', async () => {

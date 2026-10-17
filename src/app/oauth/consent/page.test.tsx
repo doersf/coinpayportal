@@ -47,10 +47,11 @@ describe('OAuth consent page', () => {
     expect([...items].map((li) => li.getAttribute('data-scope'))).toEqual([
       'openid', 'profile', 'email', 'wallet:read', 'merchant',
     ]);
-    expect(screen.getByText('Merchant account (full access)')).toBeTruthy();
+    expect(screen.getByText('Merchant account')).toBeTruthy();
     const merchant = container.querySelector('li[data-scope="merchant"]')!;
     expect(merchant.className).toContain('border-amber-600');
-    expect(merchant.textContent).toContain('send payouts');
+    expect(merchant.textContent).toContain('It cannot send payouts, transfers or withdrawals.');
+    expect(merchant.textContent).toContain('add payout addresses');
     const wallet = container.querySelector('li[data-scope="wallet:read"]')!;
     expect(wallet.className).not.toContain('amber');
   });

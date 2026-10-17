@@ -41,7 +41,7 @@ describe('PUT /api/invoices/[id] payout and concurrency boundaries', () => {
     access(role);
     mock.funds.mockResolvedValue({ ok: false, status: 403, error: 'Insufficient permissions' });
     expect((await put({ merchant_wallet_address: 'wallet-b' })).status).toBe(403);
-    expect(mock.funds).toHaveBeenCalledWith(expect.anything(), 'writer-1', original.business_id, 'funds.move');
+    expect(mock.funds).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ merchantId: 'writer-1' }), original.business_id, 'funds.move');
     expect(mock.payee).not.toHaveBeenCalled();
     expect(mock.from).not.toHaveBeenCalled();
   });

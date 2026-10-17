@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireMerchant } from '@/lib/auth/merchant-guard';
+import { refuseOAuthFundsMove } from '@/lib/auth/oauth-funds';
 import { bankTransfersEnabled } from '@/lib/banking/providers';
 import { linkBankAccount, publicCounterparty } from '@/lib/banking/service';
 import { bankingDeps, bankingErrorResponse, resolveBusinessId, NO_STORE } from '@/lib/banking/http';
@@ -32,6 +33,10 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const guard = await requireMerchant(req);
   if (guard instanceof NextResponse) return guard;
+  // A linked account is a destination for bank transfers; apps signed in with
+  // CoinPay cannot set one up, as they cannot originate the transfer either.
+  const oauthRefusal = refuseOAuthFundsMove(guard);
+  if (oauthRefusal) return oauthRefusal;
 
   if (!bankTransfersEnabled()) {
     return NextResponse.json({ error: 'Bank transfers are not enabled' }, { status: 404 });

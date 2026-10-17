@@ -98,14 +98,17 @@ describe('OAuth Scopes', () => {
       }
     });
 
-    it('marks merchant as sensitive and says it can send money', () => {
+    it('marks merchant as sensitive: it can add payout addresses but cannot move funds', () => {
       const info = describeScope('merchant');
       expect(info.sensitive).toBe(true);
-      expect(info.label).toMatch(/merchant/i);
-      // A merchant-scope token reaches /api/payouts/create and
-      // /api/banking/transfers, so the copy must not promise otherwise.
-      expect(info.description).toMatch(/send payouts/);
-      expect(info.description).not.toMatch(/cannot/i);
+      expect(info.label).toBe('Merchant account');
+      // Payouts, bank transfers and custom payout addresses refuse an OAuth
+      // token (oauth_cannot_move_funds), so the copy says so ...
+      expect(info.description).toMatch(/cannot send payouts, transfers or withdrawals/);
+      // ... while adding payout addresses (onboarding) is still allowed and
+      // redirects future payments, which is why it stays flagged.
+      expect(info.description).toMatch(/add payout addresses/);
+      expect(info.description).toMatch(/receive future payments/);
     });
 
     it('keeps the read-only scopes unmarked', () => {

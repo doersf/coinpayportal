@@ -20,12 +20,15 @@ export type ScopeInfo = {
 /**
  * What each scope lets an app do, in the words the consent screen shows.
  *
- * `merchant` must stay honest about reach: a merchant-scope access token is
- * accepted by authenticateRequest (src/lib/auth/middleware.ts) and
- * requireMerchant (src/lib/auth/merchant-guard.ts), so it can reach
- * /api/payouts/create (crypto payouts from a business wallet) and
- * /api/banking/transfers as well as the routes that opt in with
- * `allowOAuth`. Do not tell users it cannot move money.
+ * `merchant` must stay honest about reach. A merchant-scope access token acts
+ * as the user on the merchant API (businesses, payments, invoices, payout
+ * addresses, webhooks) but cannot move funds: payouts (/api/payouts/create),
+ * bank transfers and linked bank accounts (/api/banking), custom payout
+ * addresses on payments and invoices (`funds.move` in authorizeBusiness), pay
+ * runs, and business API keys (which can send payouts) are all refused with
+ * `oauth_cannot_move_funds`; see src/lib/auth/oauth-funds.ts. It CAN add
+ * payout addresses to a business (onboarding needs it), and those receive
+ * future payments, so the entry stays flagged.
  */
 export const SCOPE_INFO: Record<OAuthScope, ScopeInfo> = {
   openid: { label: 'Identity', description: 'Verify your identity', icon: '🔑' },
@@ -34,11 +37,12 @@ export const SCOPE_INFO: Record<OAuthScope, ScopeInfo> = {
   did: { label: 'DID', description: 'Access your decentralized identifier', icon: '🆔' },
   'wallet:read': { label: 'Wallet', description: 'View your wallet addresses', icon: '💰' },
   merchant: {
-    label: 'Merchant account (full access)',
+    label: 'Merchant account',
     description:
       'Act as you on your CoinPay merchant account: create businesses, payments and invoices, ' +
-      'add payout addresses, change business settings such as webhooks, and send payouts and ' +
-      'transfers from your businesses. Only approve apps you trust with your money.',
+      'add payout addresses, and change business settings such as webhooks. Payout addresses it ' +
+      'adds receive future payments, so only approve apps you trust. It cannot send payouts, ' +
+      'transfers or withdrawals.',
     icon: '⚠️',
     sensitive: true,
   },

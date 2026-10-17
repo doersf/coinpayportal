@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getBusiness, updateBusiness, deleteBusiness } from '@/lib/business/service';
 import { resolveMerchantBearer } from '@/lib/auth/bearer';
 import { authorizeBusiness } from '@/lib/auth/authz';
+import { withoutApiKeyForOAuth } from '@/lib/auth/oauth-funds';
 import { can } from '@/lib/auth/permissions';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -32,7 +33,7 @@ async function verifyAuth(request: NextRequest, { allowOAuth = false } = {}) {
   if (auth.kind === 'oauth' && !allowOAuth) {
     return { error: 'This endpoint requires a dashboard session', status: 403 };
   }
-  return { merchantId: auth.merchantId };
+  return { merchantId: auth.merchantId, via: auth.kind };
 }
 
 /**
@@ -152,7 +153,9 @@ export async function PATCH(
     }
 
     return NextResponse.json(
-      { success: true, business: result.business, classification: result.classification },
+      // The updated row includes the business API key, which can send payouts:
+      // an app signed in with CoinPay does not get it.
+      { success: true, business: withoutApiKeyForOAuth(result.business, auth), classification: result.classification },
       { status: 200 }
     );
   } catch (error) {

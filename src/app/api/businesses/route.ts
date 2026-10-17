@@ -4,6 +4,7 @@ import { createBusiness, listAccessibleBusinesses } from '@/lib/business/service
 import { authenticateRequest, isMerchantAuth } from '@/lib/auth/middleware';
 import { verifyToken } from '@/lib/auth/jwt';
 import { getJwtSecret } from '@/lib/secrets';
+import { withoutApiKeyForOAuth, type AuthVia } from '@/lib/auth/oauth-funds';
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -18,7 +19,7 @@ function getSupabase() {
 async function getMerchantId(
   request: NextRequest,
   supabase: ReturnType<typeof getSupabase>
-): Promise<{ merchantId?: string; error?: string }> {
+): Promise<{ merchantId?: string; via?: AuthVia; error?: string }> {
   const authHeader = request.headers.get('authorization');
   const apiKeyHeader = request.headers.get('x-api-key');
   const token = authHeader || (apiKeyHeader ? `Bearer ${apiKeyHeader}` : null);
@@ -32,7 +33,7 @@ async function getMerchantId(
     const authResult = await authenticateRequest(supabase, token);
     if (authResult.success && authResult.context) {
       if (isMerchantAuth(authResult.context)) {
-        return { merchantId: authResult.context.merchantId };
+        return { merchantId: authResult.context.merchantId, via: authResult.context.via ?? 'session' };
       }
       // API key auth — get merchant_id from the business that owns this key
       if ('businessId' in authResult.context) {
@@ -42,7 +43,7 @@ async function getMerchantId(
           .eq('id', (authResult.context as any).businessId)
           .single();
         if (business?.merchant_id) {
-          return { merchantId: business.merchant_id };
+          return { merchantId: business.merchant_id, via: 'api_key' };
         }
       }
     }
@@ -75,7 +76,7 @@ async function getMerchantId(
 export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabase();
-    const { merchantId, error: authError } = await getMerchantId(request, supabase);
+    const { merchantId, via, error: authError } = await getMerchantId(request, supabase);
 
     if (!merchantId) {
       return NextResponse.json(
@@ -102,7 +103,9 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { success: true, businesses: result.businesses },
+      // An app signed in with CoinPay never sees a business API key: the key
+      // can send payouts, which such an app may not.
+      { success: true, businesses: (result.businesses ?? []).map((b) => withoutApiKeyForOAuth(b, { via })) },
       { status: 200 }
     );
   } catch (error) {
@@ -124,7 +127,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabase();
-    const { merchantId, error: authError } = await getMerchantId(request, supabase);
+    const { merchantId, via, error: authError } = await getMerchantId(request, supabase);
 
     if (!merchantId) {
       return NextResponse.json(
@@ -144,7 +147,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { success: true, business: result.business, classification: result.classification },
+      { success: true, business: withoutApiKeyForOAuth(result.business, { via }), classification: result.classification },
       { status: 201 }
     );
   } catch (error) {

@@ -262,8 +262,12 @@ export async function POST(request: NextRequest) {
     // Get merchant ID from auth context
     let merchantId: string;
     let authBusinessId: string | null = null;
+    // 'oauth' for an app signed in with CoinPay: it may create payments, but
+    // not name where they pay out (that is moving funds).
+    let authVia: 'session' | 'oauth' | 'api_key' = 'api_key';
     if (isMerchantAuth(authResult.context)) {
       merchantId = authResult.context.merchantId;
+      authVia = authResult.context.via ?? 'session';
     } else if (isBusinessAuth(authResult.context)) {
       merchantId = authResult.context.merchantId;
       authBusinessId = authResult.context.businessId;
@@ -523,13 +527,20 @@ export async function POST(request: NextRequest) {
         //
         // Session callers are checked here. An API key is scoped to one
         // business rather than to a role, so it is governed by its own scope.
+        // An OAuth access token is refused outright (oauth_cannot_move_funds).
         if (!authBusinessId) {
           const fundsAuthz = await authorizeBusiness(
             supabase,
-            merchantId,
+            { merchantId, via: authVia },
             business_id,
             'funds.move',
           );
+          if (!fundsAuthz.ok && fundsAuthz.code) {
+            return NextResponse.json(
+              { success: false, error: fundsAuthz.error, code: fundsAuthz.code },
+              { status: fundsAuthz.status }
+            );
+          }
           if (!fundsAuthz.ok) {
             return NextResponse.json(
               {

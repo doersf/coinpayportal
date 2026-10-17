@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { authenticateRequest, isMerchantAuth, isBusinessAuth, hasScope } from '@/lib/auth/middleware';
 import { createPayout } from '@/lib/payouts/service';
+import { refuseOAuthFundsMove } from '@/lib/auth/oauth-funds';
 
 /**
  * POST /api/payouts/create
@@ -45,6 +46,11 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
+
+    // Apps signed in with CoinPay (an OAuth access token with the `merchant`
+    // scope) cannot send money. Sessions and API keys are unaffected.
+    const oauthRefusal = refuseOAuthFundsMove(authResult.context);
+    if (oauthRefusal) return oauthRefusal;
 
     // F-1.1-07: `payouts:create` is offered when a merchant mints a scoped key,
     // so a merchant can create a key deliberately without it — and this, the

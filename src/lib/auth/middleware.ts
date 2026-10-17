@@ -3,6 +3,7 @@ import { verifyToken } from './jwt';
 import { merchantFromAccessToken } from './oauth-bearer';
 import { isApiKey, getBusinessByApiKey } from './apikey';
 import { resolveScopedKey, scopesSatisfy, WILDCARD_SCOPE } from './scoped-keys';
+import { FUNDS_MOVING_SCOPES } from './oauth-funds';
 
 /**
  * Authentication context types
@@ -11,6 +12,15 @@ export interface MerchantAuthContext {
   type: 'merchant';
   merchantId: string;
   email: string;
+  /**
+   * 'oauth' when the bearer was an OAuth access token with the `merchant`
+   * scope (a third-party app, or the CLI's loopback login) rather than a
+   * dashboard session. Such a caller cannot move funds; see ./oauth-funds.
+   * Absent means a session (older call sites build the context by hand).
+   */
+  via?: 'session' | 'oauth';
+  /** The OAuth client the token was issued to, when `via` is 'oauth'. */
+  oauthClientId?: string | null;
 }
 
 export interface BusinessAuthContext {
@@ -110,13 +120,22 @@ async function authenticateWithJWT(
     // `merchant` scope (the CoinPay CLI's login).
     let userId: string | null = null;
     let jwtError: unknown = null;
+    let via: 'session' | 'oauth' = 'session';
+    let oauthClientId: string | null = null;
     try {
       const decoded = verifyToken(token, jwtSecret);
       userId = decoded?.userId ?? null;
     } catch (err) {
       jwtError = err;
     }
-    if (!userId) userId = merchantFromAccessToken(token)?.id ?? null;
+    if (!userId) {
+      const oauth = merchantFromAccessToken(token);
+      if (oauth) {
+        userId = oauth.id;
+        via = 'oauth';
+        oauthClientId = oauth.clientId;
+      }
+    }
     if (!userId) {
       if (jwtError) throw jwtError;
       return {
@@ -145,6 +164,8 @@ async function authenticateWithJWT(
         type: 'merchant',
         merchantId: merchant.id,
         email: merchant.email,
+        via,
+        ...(via === 'oauth' ? { oauthClientId } : {}),
       },
     };
   } catch (error) {
@@ -243,12 +264,18 @@ export function isBusinessAuth(context: AuthContext): context is BusinessAuthCon
  * Whether the auth context is permitted to perform an action requiring `scope`.
  * Merchant (JWT/dashboard) auth always passes; business (API-key) auth passes
  * when its granted scopes satisfy the requirement (legacy keys hold '*').
+ * An OAuth merchant context never holds a funds-moving scope
+ * (`payouts:create`, `payments:refund`): apps signed in with CoinPay cannot
+ * move funds. Routes should still call `refuseOAuthFundsMove` first so the
+ * caller gets the `oauth_cannot_move_funds` code rather than a scope error.
  *
  * @param {AuthContext} context - Authentication context
  * @param {string} scope - Required scope, e.g. 'payments:create'
  * @returns {boolean} True if the action is permitted
  */
 export function hasScope(context: AuthContext, scope: string): boolean {
-  if (isMerchantAuth(context)) return true;
+  if (isMerchantAuth(context)) {
+    return !(context.via === 'oauth' && FUNDS_MOVING_SCOPES.has(scope));
+  }
   return scopesSatisfy(context.scopes ?? [], scope);
 }
