@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import {
   businessWorkItemSchema,
   contractSchema,
@@ -11,7 +12,8 @@ import {
 } from './service';
 
 beforeAll(() => {
-  process.env.ENCRYPTION_KEY = '3f9c1e7a5b2d8c4e6f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e';
+  // A fresh key per run: the weak-key guard refuses constants.
+  process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex');
 });
 
 describe('nextPayDate (mirrors contractor_next_pay_date in SQL)', () => {
