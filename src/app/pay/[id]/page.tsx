@@ -29,10 +29,12 @@ interface Payment {
     total_amount_usd?: number;
     description?: string;
     redirect_url?: string;
+    cancel_url?: string;
     stripe_checkout_url?: string;
     stripe_session_id?: string;
     payment_method?: string;
   };
+  merchant_name?: string | null;
 }
 
 interface Business {
@@ -440,6 +442,13 @@ export default function PublicPaymentPage() {
   const isPaymentFailed = paymentStatus === 'expired' || paymentStatus === 'failed';
   const isPaymentPending = paymentStatus === 'pending' || paymentStatus === 'detected';
 
+  // The public payment carries the merchant's name; the business lookup is a
+  // fallback for a signed-in merchant viewing their own payment.
+  const merchantName = payment.merchant_name || business?.name || null;
+  // "Back to <merchant>" from a dead checkout: the merchant's cancel_url, else
+  // the URL they send completed payments to. Both are sanitised server-side.
+  const merchantReturnUrl = payment.metadata?.cancel_url || payment.metadata?.redirect_url || null;
+
   // Determine current step for progress indicator
   const getCurrentStep = (): number => {
     if (isPaymentComplete) return 4;
@@ -466,8 +475,8 @@ export default function PublicPaymentPage() {
             </svg>
             <span className="font-semibold">CoinPay</span>
           </Link>
-          {business && (
-            <p className="text-gray-400 text-sm">Payment to {business.name}</p>
+          {merchantName && (
+            <p className="text-gray-400 text-sm">Payment to {merchantName}</p>
           )}
         </div>
 
@@ -651,6 +660,42 @@ export default function PublicPaymentPage() {
           )}
 
           <div className="p-6 space-y-6">
+            {/* === EXPIRED / FAILED: what now === */}
+            {isPaymentFailed && (
+              <div className="bg-gray-900/50 rounded-xl p-4 space-y-3" data-testid="checkout-closed">
+                <h3 className="text-base font-semibold text-white">This checkout has closed</h3>
+                <p className="text-sm text-gray-300">
+                  {paymentStatus === 'expired'
+                    ? 'The payment window ended before a payment arrived. The price is only held for a limited time, so this checkout cannot be paid any more.'
+                    : 'This payment could not be completed and cannot be paid any more.'}
+                </p>
+                {paymentStatus === 'expired' && hasCryptoOption && (
+                  <p className="text-sm text-gray-300">
+                    <span className="font-medium text-white">Already sent the exact amount?</span>{' '}
+                    Do not send it again. A late payment to this address is still detected and credited,
+                    usually within about an hour.
+                  </p>
+                )}
+                <p className="text-sm text-gray-300">
+                  To pay, start a new checkout{merchantName ? ` on ${merchantName}` : ' on the merchant\'s site'}.
+                  You will get a fresh price and a new address.
+                </p>
+                {merchantReturnUrl && (
+                  <a
+                    href={merchantReturnUrl}
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-2 w-full px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-xl transition-colors"
+                    data-testid="back-to-merchant"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                    {merchantName ? `Back to ${merchantName}` : 'Back to the merchant'}
+                  </a>
+                )}
+              </div>
+            )}
+
             {/* === BANK TAB === */}
             {activeTab === 'bank' && hasBankOption && isPaymentPending && (
               <div className="space-y-6" data-testid="bank-payment-section">
@@ -759,7 +804,7 @@ export default function PublicPaymentPage() {
                     </p>
                   )}
 
-                  {payment.crypto_amount && (
+                  {payment.crypto_amount && !isPaymentFailed && (
                     <button
                       onClick={() => copyToClipboard(parseFloat(payment.crypto_amount).toFixed(8), 'amount')}
                       className={`mt-3 w-full py-3 px-4 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all ${
@@ -926,7 +971,7 @@ export default function PublicPaymentPage() {
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                   </svg>
-                  Return to Merchant
+                  {merchantName ? `Return to ${merchantName}` : 'Return to Merchant'}
                 </a>
                 <p className="text-xs text-gray-500 mt-2">
                   You will be redirected automatically in a few seconds...
