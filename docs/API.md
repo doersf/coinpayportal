@@ -501,6 +501,8 @@ Generate a new payment request. This is the primary endpoint merchants use to ac
 | `blockchain` | string | Yes | Blockchain/cryptocurrency to accept |
 | `description` | string | No | Description shown to customer |
 | `metadata` | object | No | Custom data for your records |
+| `redirect_url` | string | No | Where the pay page sends the customer after a completed payment |
+| `expires_in_minutes` | number | No | Payment window, 15 to 120 minutes (default 15). Values outside the range are clamped; a non-number is a 400. The crypto amount is quoted once and locked for the whole window, and settlement needs the full quoted amount, so on a volatile asset a longer window is price exposure you choose to carry. Stablecoins carry none. |
 
 **Supported Blockchains:**
 

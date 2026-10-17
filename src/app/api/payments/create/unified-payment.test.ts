@@ -77,10 +77,14 @@ vi.mock('@/lib/fraud/screen', () => ({
   screenCheckout: (...args: unknown[]) => mockScreenCheckout(...args),
 }));
 
-vi.mock('@/lib/payments/service', () => ({
-  createPayment: mockCreatePayment,
-  Blockchain: {},
-}));
+vi.mock('@/lib/payments/service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/payments/service')>();
+  return {
+    createPayment: mockCreatePayment,
+    resolveCheckoutWindow: actual.resolveCheckoutWindow,
+    Blockchain: {},
+  };
+});
 
 import { POST } from './route';
 import { releaseTransactionQuota } from '@/lib/entitlements/service';
@@ -277,6 +281,53 @@ describe('Unified Payment Creation - POST /api/payments/create', () => {
       // No stripe fields
       expect(data.payment.stripe_checkout_url).toBeUndefined();
       expect(data.payment.stripe_session_id).toBeUndefined();
+    });
+
+    describe('expires_in_minutes', () => {
+      const created = {
+        success: true,
+        payment: {
+          id: 'pay_window',
+          business_id: 'biz_123',
+          amount: '5.00',
+          crypto_amount: '5.01',
+          blockchain: 'USDC_POL',
+          status: 'pending',
+          payment_address: '0x0000000000000000000000000000000000000001',
+        },
+      };
+
+      it.each([
+        [undefined, 15],
+        [60, 60],
+        ['45', 45],
+        [5, 15],
+        [600, 120],
+        [59.6, 60],
+      ])('passes %s through as a %i minute window', async (requested, expected) => {
+        mockCreatePayment.mockResolvedValue(created);
+        const body: Record<string, unknown> = { business_id: 'biz_123', amount_usd: 5, currency: 'usdc_pol' };
+        if (requested !== undefined) body.expires_in_minutes = requested;
+
+        const response = await POST(makeRequest(body));
+
+        expect(response.status).toBe(201);
+        expect(mockCreatePayment).toHaveBeenCalledWith(
+          mockSupabase,
+          expect.objectContaining({ expires_in_minutes: expected })
+        );
+      });
+
+      it('refuses a window that is not a number before spending quota', async () => {
+        const response = await POST(
+          makeRequest({ business_id: 'biz_123', amount_usd: 5, currency: 'usdc_pol', expires_in_minutes: 'an hour' })
+        );
+        const data = await response.json();
+
+        expect(response.status).toBe(400);
+        expect(data.code).toBe('INVALID_EXPIRES_IN_MINUTES');
+        expect(mockCreatePayment).not.toHaveBeenCalled();
+      });
     });
 
     it('should create a crypto payment when payment_method=crypto', async () => {

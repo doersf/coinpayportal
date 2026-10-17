@@ -96,6 +96,17 @@ const getCurrencyColor = (blockchain: string): string => {
   return colors[blockchain] || 'bg-gray-500';
 };
 
+// Length of this payment's window in seconds. Merchants may choose 15 to 120
+// minutes, so the progress bar cannot assume 15.
+const windowSeconds = (payment: Payment): number => {
+  const start = Date.parse(payment.created_at);
+  const end = payment.expires_at ? Date.parse(payment.expires_at) : NaN;
+  if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+    return Math.round((end - start) / 1000);
+  }
+  return PAYMENT_EXPIRY_MINUTES * 60;
+};
+
 export default function PublicPaymentPage() {
   const params = useParams();
   const paymentId = params.id as string;
@@ -526,7 +537,7 @@ export default function PublicPaymentPage() {
                   className={`h-1.5 rounded-full transition-all duration-1000 ${
                     paymentStatus === 'detected' ? 'bg-blue-500' : 'bg-purple-500'
                   }`}
-                  style={{ width: `${(timeRemaining / (PAYMENT_EXPIRY_MINUTES * 60)) * 100}%` }}
+                  style={{ width: `${Math.min(100, (timeRemaining / windowSeconds(payment)) * 100)}%` }}
                 ></div>
               </div>
             )}

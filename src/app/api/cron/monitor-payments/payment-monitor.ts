@@ -12,6 +12,7 @@ import type { Payment, MonitorStats } from './types';
 import { processConfirmedBusinessCollectionPayment } from '@/lib/payments/business-collection';
 import { handleSubscriptionPaymentConfirmed } from '@/lib/subscriptions/service';
 import { isSufficientPayment } from '@/lib/payments/tolerance';
+import { paymentWindowMinutes } from '@/lib/payments/service';
 
 const MAX_FORWARD_RETRY_ATTEMPTS = 5;
 
@@ -367,7 +368,7 @@ export async function monitorPayments(
           if (!(await expirePendingPayment(supabase, 'payments', payment.id, now))) continue;
 
           await sendWebhook(supabase, { ...payment, status: 'expired' } as Payment, 'payment.expired', {
-            reason: 'Payment window expired (15 minutes)',
+            reason: `Payment window expired (${paymentWindowMinutes(payment.created_at, payment.expires_at)} minutes)`,
             expired_at: now.toISOString(),
           });
 
@@ -394,7 +395,7 @@ export async function monitorPayments(
         if (!(await expirePendingPayment(supabase, 'payments', payment.id, now))) continue;
 
         await sendWebhook(supabase, { ...payment, status: 'expired' } as Payment, 'payment.expired', {
-          reason: 'Payment window expired (15 minutes)',
+          reason: `Payment window expired (${paymentWindowMinutes(payment.created_at, payment.expires_at)} minutes)`,
           expired_at: now.toISOString(),
         });
 
