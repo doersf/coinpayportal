@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getPostBySlug, formatBlogDate, SITE_URL } from '@/lib/blog';
 import { sanitizeBlogHtml } from '@/lib/blog-sanitize';
+import { stripDeadLinks } from '@/lib/dead-links';
 import { splitHtmlForMidAd } from '@/lib/blog-split-html';
 import AdUnit from '@/components/AdUnit';
 import { serializeJsonLd } from '@/lib/seo/json-ld';
@@ -44,7 +45,7 @@ export default async function BlogPostPage({ params }: RouteParams) {
   const post = await getPostBySlug(slug);
   if (!post) notFound();
 
-  const html = post.content_html ? sanitizeBlogHtml(post.content_html) : null;
+  const html = post.content_html ? stripDeadLinks(sanitizeBlogHtml(post.content_html)) : null;
   // Null for short posts and markdown-only bodies — those render straight
   // through with just the top and bottom units.
   const split = splitHtmlForMidAd(html);
