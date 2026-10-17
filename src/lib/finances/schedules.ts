@@ -306,7 +306,7 @@ export async function sendDailySummary(schedule: EmailScheduleRow, now: Date = n
       // Debits on any account, card purchases included; a payment onto a
       // card posts positive and is not a charge.
       if (amount < 0) {
-        debits.push({ payee: String(row.payee || row.description || 'Unknown').slice(0, 60), amount: -amount, accountName: account?.name ?? '', posted: row.posted as string });
+        debits.push({ payee: String(row.payee || row.description || 'Unknown').slice(0, 60), amount: -amount, accountName: account?.name ?? '', posted: (row.posted as string | null) ?? '' });
       }
     }
   }

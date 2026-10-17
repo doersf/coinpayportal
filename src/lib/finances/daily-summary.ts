@@ -238,7 +238,7 @@ ${
     ? table(
         activity.largest
           .map(
-            (t) => `<tr><td style="padding:4px 8px;border-bottom:1px solid ${C.rule};white-space:nowrap;color:${C.muted}">${escapeHtml(t.posted.slice(0, 10))}</td>
+            (t) => `<tr><td style="padding:4px 8px;border-bottom:1px solid ${C.rule};white-space:nowrap;color:${C.muted}">${escapeHtml(t.posted ? t.posted.slice(0, 10) : 'pending')}</td>
 <td style="padding:4px 8px;border-bottom:1px solid ${C.rule}">${escapeHtml(t.payee)}<div style="font-size:11px;color:${C.muted}">${escapeHtml(t.accountName)}</div></td>
 <td style="padding:4px 8px;border-bottom:1px solid ${C.rule};text-align:right">${escapeHtml(money(t.amount, cur))}</td></tr>`,
           )

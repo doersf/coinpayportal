@@ -98,4 +98,11 @@ describe('daily summary email', () => {
     const empty = { ...input(), due: buildDueSoon({ charges: [], now: NOW, timezone: 'UTC' }) };
     expect(renderDailySummaryHtml(empty)).toContain('Nothing due in the next 7 days.');
   });
+
+  it('renders a newly imported row that has no posted date yet (pending)', () => {
+    const base = input();
+    const html = renderDailySummaryHtml({ ...base, activity: { ...base.activity, largest: [{ payee: 'Pending Vendor', amount: 12, accountName: 'Chase', posted: null as unknown as string }] } });
+    expect(html).toContain('Pending Vendor');
+    expect(html).toContain('pending');
+  });
 });
