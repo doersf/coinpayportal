@@ -48,6 +48,71 @@ export const MAX_PAYMENT_EXPIRATION_MINUTES = 60 * 24 * 90;
 export const MIN_PAYMENT_EXPIRATION_MINUTES = 1;
 
 /**
+ * Bounds on `expires_in_minutes` for the public checkout API
+ * (POST /api/payments/create).
+ *
+ * The route used to drop the field and every checkout got 15 minutes, which is
+ * not long enough for a buyer who has to fund a wallet or buy the coin first:
+ * one merchant saw 14 of 16 outside checkouts expire with nothing sent. A
+ * merchant can now ask for up to two hours. The quoted crypto amount is locked
+ * for the whole window and settlement still requires the full quoted amount
+ * (lib/payments/tolerance.ts), so the merchant always receives exactly what
+ * was quoted; on a volatile asset the longer window is fiat price exposure the
+ * merchant opts into, which is why the ceiling is two hours rather than the
+ * 90 days invoices are allowed. Stablecoins carry none.
+ */
+export const CHECKOUT_MIN_EXPIRATION_MINUTES = PAYMENT_EXPIRATION_MINUTES;
+export const CHECKOUT_MAX_EXPIRATION_MINUTES = 120;
+
+export type CheckoutWindowResult =
+  | { ok: true; minutes: number }
+  | { ok: false; error: string };
+
+/**
+ * Read a caller's `expires_in_minutes` for a checkout.
+ *
+ * Absent → the 15-minute default (unchanged behaviour). A number is rounded to
+ * whole minutes and clamped into [15, 120] rather than refused, so a client
+ * asking for 10 or 240 still gets a working checkout. Anything that is not a
+ * finite number is a 400: silently ignoring a typo is how this field went
+ * unnoticed in the first place.
+ */
+export function resolveCheckoutWindow(raw: unknown): CheckoutWindowResult {
+  if (raw === undefined || raw === null || raw === '') {
+    return { ok: true, minutes: PAYMENT_EXPIRATION_MINUTES };
+  }
+  const n = typeof raw === 'string' ? Number(raw.trim()) : raw;
+  if (typeof n !== 'number' || !Number.isFinite(n)) {
+    return {
+      ok: false,
+      error: `expires_in_minutes must be a number between ${CHECKOUT_MIN_EXPIRATION_MINUTES} and ${CHECKOUT_MAX_EXPIRATION_MINUTES}`,
+    };
+  }
+  const minutes = Math.min(
+    Math.max(Math.round(n), CHECKOUT_MIN_EXPIRATION_MINUTES),
+    CHECKOUT_MAX_EXPIRATION_MINUTES
+  );
+  return { ok: true, minutes };
+}
+
+/**
+ * Whole minutes between a payment's creation and its expiry, for messages
+ * such as the payment.expired webhook reason. Falls back to the default
+ * window when either timestamp is missing or unreadable.
+ */
+export function paymentWindowMinutes(
+  createdAt: string | null | undefined,
+  expiresAt: string | null | undefined
+): number {
+  const start = createdAt ? Date.parse(createdAt) : NaN;
+  const end = expiresAt ? Date.parse(expiresAt) : NaN;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return PAYMENT_EXPIRATION_MINUTES;
+  }
+  return Math.max(1, Math.round((end - start) / 60_000));
+}
+
+/**
  * Validation schemas
  */
 const blockchainSchema = z.enum([

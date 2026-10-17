@@ -192,7 +192,7 @@ export function PaymentStatusCard({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <div className="text-sm text-blue-300">
-                <span className="font-medium">You have {PAYMENT_EXPIRATION_MINUTES} minutes</span> to complete this payment.
+                <span className="font-medium">You have {Math.ceil(timeLeft / 60)} minutes</span> to complete this payment.
                 After that, the payment will expire and you&apos;ll need to create a new one.
               </div>
             </div>
@@ -275,7 +275,7 @@ export function PaymentStatusCard({
             </div>
             <div className="text-lg font-semibold text-white mb-2">Payment Expired</div>
             <div className="text-sm text-gray-400 mb-4">
-              The {PAYMENT_EXPIRATION_MINUTES}-minute payment window has passed.
+              The payment window has passed.
             </div>
             <div className="text-xs text-gray-500">
               No funds were received. Please create a new payment to try again.

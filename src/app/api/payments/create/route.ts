@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
-import { createPayment, Blockchain } from '@/lib/payments/service';
+import { createPayment, Blockchain, resolveCheckoutWindow } from '@/lib/payments/service';
 import { authenticateRequest, isMerchantAuth, isBusinessAuth, hasScope } from '@/lib/auth/middleware';
 import {
   withTransactionLimit,
@@ -316,7 +316,20 @@ export async function POST(request: NextRequest) {
       success_url,
       cancel_url,
       merchant_wallet_address: requestedMerchantWallet,
+      expires_in_minutes: requestedWindow,
     } = body;
+
+    // Payment window. Default 15 minutes; a merchant may ask for up to 120.
+    // This field used to be dropped here, so every checkout expired at 15
+    // minutes whatever the caller sent. See resolveCheckoutWindow.
+    const checkoutWindow = resolveCheckoutWindow(requestedWindow);
+    if (!checkoutWindow.ok) {
+      return NextResponse.json(
+        { success: false, error: checkoutWindow.error, code: 'INVALID_EXPIRES_IN_MINUTES' },
+        { status: 400 }
+      );
+    }
+    const windowMinutes = checkoutWindow.minutes;
 
     const paymentMethod: PaymentMethod = (['crypto', 'card', 'both'].includes(rawPaymentMethod))
       ? rawPaymentMethod
@@ -563,6 +576,7 @@ export async function POST(request: NextRequest) {
         blockchain: blockchainType,
         merchant_wallet_address: recipientAddress,
         idempotency_key: idempotencyKey || undefined,
+        expires_in_minutes: windowMinutes,
         metadata: Object.keys(paymentMetadata).length > 0
           ? { ...paymentMetadata, wallet_source: walletSource }
           : { wallet_source: walletSource },
@@ -635,7 +649,7 @@ export async function POST(request: NextRequest) {
       if (!cryptoPaymentResult) {
         const paymentId = crypto.randomUUID();
         const now = new Date().toISOString();
-        const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+        const expiresAt = new Date(Date.now() + windowMinutes * 60 * 1000).toISOString();
 
         const { data: cardPayment, error: cardPaymentError } = await supabase
           .from('payments')
