@@ -309,7 +309,15 @@ export async function sendDailySummary(schedule: EmailScheduleRow, now: Date = n
       recurringCount: dueSoon.recurring.charges.length,
     },
     appUrl: appBaseUrl(),
+    spend: undefined as import('./spend-trend').SpendTrend | undefined,
   };
+  // Spend & cuts is extra: if it cannot be built tonight, the summary still goes out without it.
+  try {
+    const { loadSpendTrend } = await import('./spend-trend-load');
+    input.spend = await loadSpendTrend(schedule.merchant_id, { now });
+  } catch (error) {
+    console.warn('[finances] daily summary: spend trend unavailable', error instanceof Error ? error.message : error);
+  }
   const subject = dailySummarySubject(input);
   const html = renderDailySummaryHtml(input);
 

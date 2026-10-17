@@ -9,6 +9,7 @@ const TZ = 'America/Los_Angeles';
 
 function charge(partial: Partial<RecurringCharge>): RecurringCharge {
   return {
+    key: partial.key ?? `charge:${(partial.payee ?? 'Netflix').toLowerCase()}`,
     payee: partial.payee ?? 'Netflix',
     amount: partial.amount ?? 26.99,
     cadence: partial.cadence ?? 'monthly',
