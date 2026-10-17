@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
-import { createPayment, Blockchain, resolveCheckoutWindow } from '@/lib/payments/service';
+import { createPayment, Blockchain, resolveCheckoutWindow, safeReturnUrl } from '@/lib/payments/service';
 import { authenticateRequest, isMerchantAuth, isBusinessAuth, hasScope } from '@/lib/auth/middleware';
 import {
   withTransactionLimit,
@@ -435,6 +435,19 @@ export async function POST(request: NextRequest) {
     }
     if (redirect_url) {
       paymentMetadata.redirect_url = redirect_url;
+    }
+    // Where "Back to <merchant>" goes from an expired or abandoned checkout.
+    // The card rail already took cancel_url for Stripe; the crypto pay page now
+    // uses it too, so it is kept on the payment.
+    if (cancel_url !== undefined && cancel_url !== null && cancel_url !== '') {
+      const safeCancelUrl = safeReturnUrl(cancel_url);
+      if (!safeCancelUrl) {
+        return NextResponse.json(
+          { success: false, error: 'cancel_url must be an absolute http(s) URL', code: 'INVALID_CANCEL_URL' },
+          { status: 400 }
+        );
+      }
+      paymentMetadata.cancel_url = safeCancelUrl;
     }
     let cryptoPaymentResult: any = null;
     let stripeResult: { stripe_checkout_url: string; stripe_session_id: string } | null = null;

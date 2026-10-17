@@ -363,6 +363,65 @@ describe('PublicPaymentPage', () => {
       });
     });
 
+    describe('closed checkout', () => {
+      function respondWith(payment: Record<string, unknown>) {
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          json: async () => ({ success: true, payment }),
+        } as Response);
+      }
+
+      it('links back to the merchant from an expired checkout', async () => {
+        respondWith({
+          ...mockPayment,
+          status: 'expired',
+          merchant_name: 'Example Shop',
+          metadata: { cancel_url: 'https://shop.example/numbers', redirect_url: 'https://shop.example/thanks' },
+        });
+
+        render(<PublicPaymentPage />);
+
+        const back = await screen.findByTestId('back-to-merchant');
+        expect(back).toHaveAttribute('href', 'https://shop.example/numbers');
+        expect(back).toHaveTextContent('Back to Example Shop');
+        expect(screen.getByText(/start a new checkout on Example Shop/i)).toBeInTheDocument();
+        expect(screen.getByText(/do not send it again/i)).toBeInTheDocument();
+        expect(screen.queryByTestId('copy-amount-btn')).not.toBeInTheDocument();
+      });
+
+      it('falls back to redirect_url when there is no cancel_url', async () => {
+        respondWith({
+          ...mockPayment,
+          status: 'expired',
+          merchant_name: 'Example Shop',
+          metadata: { redirect_url: 'https://shop.example/thanks' },
+        });
+
+        render(<PublicPaymentPage />);
+
+        expect(await screen.findByTestId('back-to-merchant')).toHaveAttribute('href', 'https://shop.example/thanks');
+      });
+
+      it('still explains what to do when the merchant left no return link', async () => {
+        respondWith({ ...mockPayment, status: 'expired', metadata: null });
+
+        render(<PublicPaymentPage />);
+
+        expect(await screen.findByTestId('checkout-closed')).toBeInTheDocument();
+        expect(screen.getByText(/start a new checkout on the merchant's site/i)).toBeInTheDocument();
+        expect(screen.queryByTestId('back-to-merchant')).not.toBeInTheDocument();
+      });
+
+      it('shows no closed-checkout panel while the payment is open', async () => {
+        respondWith({ ...mockPayment, status: 'pending', metadata: { cancel_url: 'https://shop.example/numbers' } });
+
+        render(<PublicPaymentPage />);
+
+        await screen.findByText(/awaiting payment/i);
+        expect(screen.queryByTestId('checkout-closed')).not.toBeInTheDocument();
+      });
+    });
+
     it('should show payment failed status', async () => {
       vi.mocked(fetch).mockResolvedValue({
         ok: true,

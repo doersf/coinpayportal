@@ -1390,6 +1390,7 @@ data.coins.filter(c => c.is_active).forEach(coin => {
   "currency": "usdc_pol",  // See currency options below
   "description": "Order #12345",  // optional
   "redirect_url": "https://yoursite.com/success",  // optional - redirect after payment
+  "cancel_url": "https://yoursite.com/checkout",  // optional - "Back to" link on an expired pay page
   "expires_in_minutes": 60  // optional - payment window, 15-120 (default 15)
 }`}
               </CodeBlock>

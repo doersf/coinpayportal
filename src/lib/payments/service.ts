@@ -200,12 +200,42 @@ export interface PublicPayment {
   /** Forward of the funds to the merchant. Null until the payment is forwarded. */
   forward_tx_hash?: string | null;
   /**
-   * Pruned metadata. Only the card checkout URL is published; the rest of the
-   * row's metadata (wallet source, fee breakdown, user ids, redirect targets)
-   * stays private. The checkout page reads stripe_checkout_url to decide
-   * whether to offer a "Pay with Card" tab.
+   * Pruned metadata. Published: the card checkout URL (the pay page reads it to
+   * offer a "Pay with Card" tab) and the merchant's own return links,
+   * redirect_url (after a completed payment) and cancel_url (back to the shop
+   * from an expired or abandoned checkout), each only when it is an http(s)
+   * URL. These are links the merchant supplied for the customer to follow, so
+   * the customer seeing them is the point. The rest of the row's metadata
+   * (wallet source, fee breakdown, user ids) stays private.
    */
-  metadata?: { stripe_checkout_url?: string } | null;
+  metadata?: PublicPaymentMetadata | null;
+  /** The merchant's display name, for "Payment to …" and "Back to …". */
+  merchant_name?: string | null;
+}
+
+export interface PublicPaymentMetadata {
+  stripe_checkout_url?: string;
+  redirect_url?: string;
+  cancel_url?: string;
+}
+
+/**
+ * A merchant-supplied return link, if it is safe to put in an href: an
+ * absolute http(s) URL of sane length. Anything else (javascript:, data:,
+ * relative paths, garbage) is dropped rather than rendered.
+ */
+export function safeReturnUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 2048) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    if (url.username || url.password) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
 }
 
 export interface PaymentResult {
@@ -594,9 +624,13 @@ const PUBLIC_PAYMENT_FIELDS = [
   'expires_at',
   'tx_hash',
   'forward_tx_hash',
-  // Fetched only so the card checkout URL can be projected out of it below.
-  // Never return this column as-is: it holds internal fee math and user ids.
+  // Fetched only so the card checkout URL and return links can be projected
+  // out of it below. Never return this column as-is: it holds internal fee
+  // math and user ids.
   'metadata',
+  // The merchant's display name, embedded through payments_business_id_fkey so
+  // business_id itself never leaves the server.
+  'businesses(name)',
 ].join(',');
 
 /**
@@ -622,19 +656,34 @@ export async function getPaymentPublic(
     }
 
     // Cast through unknown since Supabase returns generic type
-    const { metadata, ...publicFields } = payment as unknown as PublicPayment & {
+    const { metadata, businesses, ...publicFields } = payment as unknown as Omit<
+      PublicPayment,
+      'metadata'
+    > & {
       metadata?: Record<string, unknown> | null;
+      businesses?: { name?: unknown } | Array<{ name?: unknown }> | null;
     };
+
+    const publicMetadata: PublicPaymentMetadata = {};
     const checkoutUrl = metadata?.stripe_checkout_url;
+    if (typeof checkoutUrl === 'string' && checkoutUrl.length > 0) {
+      publicMetadata.stripe_checkout_url = checkoutUrl;
+    }
+    const redirectUrl = safeReturnUrl(metadata?.redirect_url);
+    if (redirectUrl) publicMetadata.redirect_url = redirectUrl;
+    const cancelUrl = safeReturnUrl(metadata?.cancel_url);
+    if (cancelUrl) publicMetadata.cancel_url = cancelUrl;
+
+    const business = Array.isArray(businesses) ? businesses[0] : businesses;
+    const merchantName =
+      typeof business?.name === 'string' && business.name.trim() ? business.name.trim() : null;
 
     return {
       success: true,
       payment: {
         ...publicFields,
-        metadata:
-          typeof checkoutUrl === 'string' && checkoutUrl.length > 0
-            ? { stripe_checkout_url: checkoutUrl }
-            : null,
+        metadata: Object.keys(publicMetadata).length > 0 ? publicMetadata : null,
+        merchant_name: merchantName,
       },
     };
   } catch (error) {

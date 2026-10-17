@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { getPaymentPublic } from './service';
+import { getPaymentPublic, safeReturnUrl } from './service';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -83,7 +83,48 @@ describe('getPaymentPublic field contract', () => {
 
     const result = await getPaymentPublic(client, 'pay_1');
 
-    expect(Object.keys(result.payment?.metadata ?? {})).toEqual(['stripe_checkout_url']);
+    // redirect_url is the merchant's own customer-facing link, so it is
+    // published; nothing else in the bag is.
+    expect(Object.keys(result.payment?.metadata ?? {}).sort()).toEqual(['redirect_url', 'stripe_checkout_url']);
+  });
+
+  it('publishes http(s) return links and drops anything else', async () => {
+    const { client } = mockSupabase({
+      id: 'pay_1',
+      metadata: {
+        redirect_url: 'javascript:alert(1)',
+        cancel_url: 'https://merchant.example/numbers',
+        user_id: 'user-should-not-leak',
+      },
+    });
+
+    const result = await getPaymentPublic(client, 'pay_1');
+
+    expect(result.payment?.metadata).toEqual({ cancel_url: 'https://merchant.example/numbers' });
+  });
+
+  it('returns the merchant name without the business id', async () => {
+    const { client, selected } = mockSupabase({
+      id: 'pay_1',
+      businesses: { name: 'Example Shop' },
+    });
+
+    const result = await getPaymentPublic(client, 'pay_1');
+
+    expect(selected[0]).toContain('businesses(name)');
+    expect(result.payment?.merchant_name).toBe('Example Shop');
+    expect(result.payment).not.toHaveProperty('businesses');
+    expect(result.payment).not.toHaveProperty('business_id');
+  });
+});
+
+describe('safeReturnUrl', () => {
+  it('accepts absolute http(s) URLs only', () => {
+    expect(safeReturnUrl('https://shop.example/numbers?x=1')).toBe('https://shop.example/numbers?x=1');
+    expect(safeReturnUrl('http://localhost:3000/back')).toBe('http://localhost:3000/back');
+    for (const bad of ['javascript:alert(1)', 'data:text/html,hi', '/numbers', 'shop.example', '', 42, null, 'https://u:p@shop.example/']) {
+      expect(safeReturnUrl(bad)).toBeNull();
+    }
   });
 
   it('returns null metadata for a crypto-only payment', async () => {
