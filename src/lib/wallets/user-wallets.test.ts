@@ -274,4 +274,66 @@ describe('listUserWallets', () => {
     expect(result.status).toBe(401);
     expect(from).not.toHaveBeenCalled();
   });
+
+  describe('linked web wallets', () => {
+    const links = [
+      { id: 'link-1', wallet_id: 'ww-1', business_id: null, label: 'My web wallet', created_at: '2026-03-01T00:00:00Z' },
+      { id: 'link-2', wallet_id: 'ww-2', business_id: BIZ, label: null, created_at: '2026-03-02T00:00:00Z' },
+    ];
+    const addresses = [
+      { id: 'wa-1', wallet_id: 'ww-1', chain: 'SOL', address: 'SoLWebAddr0', derivation_index: 0, is_active: true },
+      { id: 'wa-2', wallet_id: 'ww-1', chain: 'SOL', address: 'SoLWebAddr1', derivation_index: 1, is_active: true },
+      { id: 'wa-3', wallet_id: 'ww-2', chain: 'BTC', address: 'bc1qweb', derivation_index: 0, is_active: true },
+    ];
+
+    it("includes the first address per linked wallet and chain as source 'web_wallet'", async () => {
+      const { supabase, calls } = createMockSupabase({
+        merchant_wallets: { data: [accountWallet()], error: null },
+        businesses: { data: [], error: null },
+        business_wallets: { data: [], error: null },
+        wallet_account_links: { data: links, error: null },
+        wallet_addresses: { data: addresses, error: null },
+      });
+
+      const result = await listUserWallets(supabase, USER);
+      expect(result.success).toBe(true);
+      const web = result.wallets!.filter((w) => w.source === 'web_wallet');
+      expect(web.map((w) => w.wallet_address).sort()).toEqual(['SoLWebAddr0', 'bc1qweb']);
+      expect(web.find((w) => w.wallet_address === 'bc1qweb')!.business_id).toBe(BIZ);
+      expect(web.find((w) => w.wallet_address === 'SoLWebAddr0')!.label).toBe('My web wallet');
+      expect(calls.wallet_account_links.eq).toContainEqual(['merchant_id', USER]);
+    });
+
+    it('prefers an account or business row for the same address', async () => {
+      const { supabase } = createMockSupabase({
+        merchant_wallets: { data: [accountWallet({ cryptocurrency: 'BTC', wallet_address: 'bc1qweb' })], error: null },
+        wallet_account_links: { data: links, error: null },
+        wallet_addresses: { data: addresses, error: null },
+      });
+
+      const result = await listUserWallets(supabase, USER, { source: 'all' });
+      const btc = result.wallets!.filter((w) => w.wallet_address === 'bc1qweb');
+      expect(btc).toHaveLength(1);
+      expect(btc[0].source).toBe('account');
+    });
+
+    it('source=web_wallet returns only linked web wallets', async () => {
+      const { supabase, from } = createMockSupabase({
+        wallet_account_links: { data: links, error: null },
+        wallet_addresses: { data: addresses, error: null },
+      });
+
+      const result = await listUserWallets(supabase, USER, { source: 'web_wallet' });
+      expect(result.wallets!.every((w) => w.source === 'web_wallet')).toBe(true);
+      expect(from).not.toHaveBeenCalledWith('merchant_wallets');
+      expect(from).not.toHaveBeenCalledWith('business_wallets');
+    });
+
+    it('is not consulted for source=account or a business_id filter', async () => {
+      const { supabase, from } = createMockSupabase({});
+      await listUserWallets(supabase, USER, { source: 'account' });
+      await listUserWallets(supabase, USER, { businessId: BIZ });
+      expect(from).not.toHaveBeenCalledWith('wallet_account_links');
+    });
+  });
 });

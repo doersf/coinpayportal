@@ -6,6 +6,9 @@
  *     `merchant_id` = the merchant/account id. Managed at /settings/wallets.
  *   - `business_wallets` — per-business wallets, keyed by `business_id`.
  *     Managed under Business > Wallets, and the setup most users actually use.
+ *   - non-custodial web wallets the user proved control of and linked to the
+ *     account (`wallet_account_links` → `wallet_addresses`), reported with
+ *     source 'web_wallet'.
  *
  * Anything that answers "what wallet addresses does this user have?" — most
  * notably `GET /api/wallets` and the OIDC `wallet:read` claim — must look at
@@ -19,7 +22,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAccessibleBusinessRoles } from '@/lib/auth/authz';
 import { can } from '@/lib/auth/permissions';
 
-export type WalletSource = 'account' | 'business';
+export type WalletSource = 'account' | 'business' | 'web_wallet';
 
 /** A wallet address from either store, in one shape. */
 export interface UnifiedWallet {
@@ -28,7 +31,10 @@ export interface UnifiedWallet {
   source: WalletSource;
   /** Account owner — set for account-level wallets, null for business wallets. */
   merchant_id: string | null;
-  /** Owning business — set for business wallets, null for account-level ones. */
+  /**
+   * Owning business — set for business wallets (and business-scoped web-wallet
+   * links), null for account-level ones.
+   */
   business_id: string | null;
   business_name: string | null;
   cryptocurrency: string;
@@ -40,7 +46,10 @@ export interface UnifiedWallet {
 }
 
 export interface ListUserWalletsOptions {
-  /** 'all' (default) merges both stores. */
+  /**
+   * 'all' (default) merges every store. Linked web wallets are included under
+   * 'all' and 'web_wallet' only, never with `businessId`.
+   */
   source?: WalletSource | 'all';
   /**
    * Restrict business wallets to a single business. Implies business scope, so
@@ -65,13 +74,15 @@ function dedupeKey(cryptocurrency: string, address: string): string {
   return `${(cryptocurrency || '').toUpperCase()}:${(address || '').trim().toLowerCase()}`;
 }
 
+const SOURCE_RANK: Record<WalletSource, number> = { account: 0, business: 1, web_wallet: 2 };
+
 function sortWallets(wallets: UnifiedWallet[]): UnifiedWallet[] {
   return [...wallets].sort((a, b) => {
     const byCrypto = a.cryptocurrency.localeCompare(b.cryptocurrency);
     if (byCrypto !== 0) return byCrypto;
     // Account-level entries first so they win deduplication — business wallets
-    // are usually imported copies of them.
-    if (a.source !== b.source) return a.source === 'account' ? -1 : 1;
+    // are usually imported copies of them — and linked web wallets last.
+    if (a.source !== b.source) return SOURCE_RANK[a.source] - SOURCE_RANK[b.source];
     return (a.created_at || '').localeCompare(b.created_at || '');
   });
 }
@@ -187,6 +198,12 @@ export async function listUserWallets(
       }
     }
 
+    if (source === 'all' || source === 'web_wallet') {
+      const linked = await listLinkedWebWalletAddresses(supabase, userId, activeOnly);
+      if (linked.error) return { success: false, error: linked.error, status: 400 };
+      wallets.push(...linked.wallets);
+    }
+
     const seen = new Set<string>();
     const deduped = sortWallets(wallets).filter((w) => {
       const key = dedupeKey(w.cryptocurrency, w.wallet_address);
@@ -203,4 +220,63 @@ export async function listUserWallets(
       status: 500,
     };
   }
+}
+
+/**
+ * The receive addresses of web wallets linked to `userId` via
+ * `wallet_account_links`: the first (lowest derivation index) address per
+ * linked wallet and chain, which is the address invoices pay to.
+ */
+async function listLinkedWebWalletAddresses(
+  supabase: SupabaseClient,
+  userId: string,
+  activeOnly: boolean
+): Promise<{ wallets: UnifiedWallet[]; error?: string }> {
+  const { data: links, error } = await supabase
+    .from('wallet_account_links')
+    .select('id, wallet_id, business_id, label, created_at')
+    .eq('merchant_id', userId);
+  if (error) return { wallets: [], error: error.message };
+  if (!links || links.length === 0) return { wallets: [] };
+
+  let query = supabase
+    .from('wallet_addresses')
+    .select('id, wallet_id, chain, address, derivation_index, is_active, created_at')
+    .in(
+      'wallet_id',
+      [...new Set(links.map((l: { wallet_id: string }) => l.wallet_id))]
+    );
+  if (activeOnly) query = query.eq('is_active', true);
+
+  const { data: rows, error: addressError } = await query;
+  if (addressError) return { wallets: [], error: addressError.message };
+
+  // First address per wallet + chain.
+  const first = new Map<string, any>();
+  for (const row of rows || []) {
+    const key = `${row.wallet_id}:${row.chain}`;
+    const prev = first.get(key);
+    if (!prev || (row.derivation_index ?? 0) < (prev.derivation_index ?? 0)) first.set(key, row);
+  }
+
+  const wallets: UnifiedWallet[] = [];
+  for (const link of links as Array<{ id: string; wallet_id: string; business_id: string | null; label: string | null; created_at: string | null }>) {
+    for (const row of first.values()) {
+      if (row.wallet_id !== link.wallet_id) continue;
+      wallets.push({
+        id: row.id,
+        source: 'web_wallet',
+        merchant_id: userId,
+        business_id: link.business_id ?? null,
+        business_name: null,
+        cryptocurrency: row.chain,
+        wallet_address: row.address,
+        label: link.label ?? null,
+        is_active: row.is_active ?? true,
+        created_at: row.created_at ?? link.created_at ?? null,
+        updated_at: null,
+      });
+    }
+  }
+  return { wallets };
 }

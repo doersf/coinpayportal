@@ -23,7 +23,7 @@ function client() {
 export async function GET(request: NextRequest) {
   try {
     const supabase = client();
-    const auth = await resolveMerchant(supabase, request);
+    const auth = await resolveMerchant(supabase, request, { allowOAuth: true });
     if ('error' in auth) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const supabase = client();
-    const auth = await resolveMerchant(supabase, request);
+    const auth = await resolveMerchant(supabase, request, { allowOAuth: true });
     if ('error' in auth) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }

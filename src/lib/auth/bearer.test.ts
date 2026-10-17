@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import jwt from 'jsonwebtoken';
-import { resolveBearerAuth, hasScope, type BearerAuthOk } from './bearer';
+import { resolveBearerAuth, resolveMerchantBearer, hasScope, type BearerAuthOk } from './bearer';
 
 const JWT_SECRET = 'session-secret-for-tests';
 const OIDC_SECRET = 'oidc-secret-for-tests';
@@ -119,5 +119,66 @@ describe('hasScope', () => {
     };
     expect(hasScope(auth, 'wallet:read')).toBe(true);
     expect(hasScope(auth, 'did')).toBe(false);
+  });
+});
+
+describe('resolveMerchantBearer', () => {
+  beforeEach(() => {
+    vi.stubEnv('JWT_SECRET', JWT_SECRET);
+    vi.stubEnv('OIDC_SIGNING_SECRET', OIDC_SECRET);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('accepts a dashboard session as that merchant', () => {
+    const auth = resolveMerchantBearer(`Bearer ${sessionToken()}`);
+    expect(auth).toEqual({ ok: true, merchantId: 'user-123', kind: 'session' });
+  });
+
+  it('accepts an OAuth token with the merchant scope, acting as its sub', () => {
+    const auth = resolveMerchantBearer(
+      `Bearer ${accessToken(OIDC_SECRET, { sub: 'merchant-9', scope: 'openid profile email wallet:read merchant' })}`
+    );
+    expect(auth).toEqual({ ok: true, merchantId: 'merchant-9', kind: 'oauth' });
+  });
+
+  it('accepts a merchant-scope OAuth token signed with the session secret fallback', () => {
+    vi.stubEnv('OIDC_SIGNING_SECRET', '');
+    const auth = resolveMerchantBearer(
+      `Bearer ${accessToken(JWT_SECRET, { scope: 'openid merchant' })}`
+    );
+    expect(auth).toEqual({ ok: true, merchantId: 'user-123', kind: 'oauth' });
+  });
+
+  it('refuses an OAuth token without the merchant scope with 403 insufficient_scope', () => {
+    const auth = resolveMerchantBearer(`Bearer ${accessToken()}`);
+    expect(auth.ok).toBe(false);
+    if (auth.ok) return;
+    expect(auth.status).toBe(403);
+    expect(auth.error).toMatch(/insufficient_scope/);
+    expect(auth.wwwAuthenticate).toContain('scope="merchant"');
+  });
+
+  it('does not treat a scope that merely contains "merchant" as the merchant scope', () => {
+    const auth = resolveMerchantBearer(`Bearer ${accessToken(OIDC_SECRET, { scope: 'openid merchant:read' })}`);
+    expect(auth.ok).toBe(false);
+  });
+
+  it('refuses a refresh token even when it names the merchant scope', () => {
+    const auth = resolveMerchantBearer(
+      `Bearer ${accessToken(OIDC_SECRET, { token_type: 'refresh', scope: 'merchant' })}`
+    );
+    expect(auth.ok).toBe(false);
+    if (auth.ok) return;
+    expect(auth.status).toBe(401);
+  });
+
+  it('refuses a missing or forged token with 401', () => {
+    expect(resolveMerchantBearer(null)).toMatchObject({ ok: false, status: 401 });
+    expect(
+      resolveMerchantBearer(`Bearer ${accessToken('wrong-secret', { scope: 'merchant' })}`)
+    ).toMatchObject({ ok: false, status: 401 });
   });
 });

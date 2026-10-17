@@ -14,13 +14,14 @@ export async function GET() {
     userinfo_endpoint: `${issuer}/api/oauth/userinfo`,
     jwks_uri: `${issuer}/api/oauth/jwks`,
     registration_endpoint: `${issuer}/api/oauth/clients`,
-    scopes_supported: ['openid', 'profile', 'email', 'did', 'wallet:read'],
+    scopes_supported: ['openid', 'profile', 'email', 'did', 'wallet:read', 'merchant'],
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code', 'refresh_token'],
     subject_types_supported: ['public'],
     id_token_signing_alg_values_supported: ['HS256'],
     token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
-    code_challenge_methods_supported: ['S256', 'plain'],
+    // validatePKCE rejects 'plain' (the challenge would equal the verifier).
+    code_challenge_methods_supported: ['S256'],
     claims_supported: [
       'sub',
       'name',

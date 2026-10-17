@@ -104,3 +104,58 @@ export function hasScope(auth: BearerAuthOk, scope: string): boolean {
   if (auth.scopes === null) return true;
   return auth.scopes.includes(scope);
 }
+
+/** OAuth scope that lets a third-party app act on the merchant API. */
+export const MERCHANT_SCOPE = 'merchant';
+
+export type MerchantBearerOk = {
+  ok: true;
+  /** The merchant the caller acts as: session `userId`, or the OAuth `sub`. */
+  merchantId: string;
+  kind: 'session' | 'oauth';
+};
+
+export type MerchantBearerAuth = MerchantBearerOk | BearerAuthErr;
+
+/**
+ * Resolve an `Authorization` header to the merchant it may act as, for routes
+ * that write merchant state (wallets, business settings, webhook secrets).
+ *
+ * A dashboard session token is accepted as before. An OAuth2 access token is
+ * accepted only when its grant carries the `merchant` scope — the same rule
+ * `merchantFromAccessToken` applies for `requireMerchant`/`authenticateRequest`
+ * — and then acts as its `sub`, exactly like a session for that merchant: the
+ * route's own ownership/role checks still decide what it may touch. An OAuth
+ * token without `merchant` (e.g. `openid profile wallet:read`) gets 403
+ * insufficient_scope, never silent access.
+ */
+export function resolveMerchantBearer(authHeader: string | null | undefined): MerchantBearerAuth {
+  const auth = resolveBearerAuth(authHeader);
+  if (!auth.ok) return auth;
+  if (auth.kind === 'oauth' && !hasScope(auth, MERCHANT_SCOPE)) {
+    return {
+      ok: false,
+      status: 403,
+      error: `insufficient_scope: this token is missing the '${MERCHANT_SCOPE}' scope`,
+      wwwAuthenticate: `Bearer error="insufficient_scope", scope="${MERCHANT_SCOPE}"`,
+    };
+  }
+  return { ok: true, merchantId: auth.userId, kind: auth.kind };
+}
+
+/**
+ * The `{ success: false, error }` response body and init for a failed
+ * `resolveMerchantBearer`, carrying `WWW-Authenticate` when there is one.
+ */
+export function merchantBearerErrorInit(auth: BearerAuthErr): {
+  body: { success: false; error: string };
+  init: { status: number; headers?: Record<string, string> };
+} {
+  return {
+    body: { success: false, error: auth.error },
+    init: {
+      status: auth.status,
+      ...(auth.wwwAuthenticate ? { headers: { 'WWW-Authenticate': auth.wwwAuthenticate } } : {}),
+    },
+  };
+}

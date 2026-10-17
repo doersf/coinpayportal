@@ -1,7 +1,6 @@
 import type { NextRequest } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { verifyToken } from '@/lib/auth/jwt';
-import { getJwtSecret } from '@/lib/secrets';
+import { resolveMerchantBearer } from '@/lib/auth/bearer';
 import { isApiKey, getBusinessByApiKey } from '@/lib/auth/apikey';
 
 export type ResolvedMerchant = {
@@ -17,15 +16,28 @@ export type ResolveError = { error: string; status: number };
  * Accepts (in order):
  *   1. `x-api-key: cp_live_...`
  *   2. `Authorization: Bearer cp_live_...`
- *   3. `Authorization: Bearer <jwt>`
+ *   3. `Authorization: Bearer <session jwt>`
+ *   4. `Authorization: Bearer <OAuth access token with the merchant scope>`,
+ *      only when the caller passes `{ allowOAuth: true }`
  *
  * For API key auth, `apiKeyBusinessId` is the business that owns the key —
  * callers can use it to lock writes to that business and reject mismatched
  * `business_id` in the request body.
  */
+export type ResolveMerchantOptions = {
+  /**
+   * Also accept an OAuth access token whose grant carries the `merchant` scope,
+   * acting as its `sub`. Off by default: several callers treat "not an API key"
+   * as "a signed-in owner" and gate funds movement on it (pay runs, manual
+   * payment handles), so OAuth is opted into per route, never inherited.
+   */
+  allowOAuth?: boolean;
+};
+
 export async function resolveMerchant(
   supabase: SupabaseClient,
-  request: NextRequest
+  request: NextRequest,
+  options: ResolveMerchantOptions = {}
 ): Promise<ResolvedMerchant | ResolveError> {
   const apiKeyHeader = request.headers.get('x-api-key');
   if (apiKeyHeader) {
@@ -43,20 +55,18 @@ export async function resolveMerchant(
     return resolveApiKey(supabase, token);
   }
 
-  const jwtSecret = getJwtSecret();
-  if (!jwtSecret) {
-    return { error: 'Server configuration error', status: 500 };
+  // A dashboard session JWT, or (with `allowOAuth`) an OAuth access token whose
+  // grant carries the `merchant` scope, acting as its `sub` as oauth-bearer.ts
+  // does. An OAuth token without `merchant` is refused with 403
+  // insufficient_scope.
+  const auth = resolveMerchantBearer(authHeader);
+  if (!auth.ok) {
+    return { error: auth.error, status: auth.status };
   }
-
-  try {
-    const decoded = verifyToken(token, jwtSecret);
-    if (!decoded?.userId) {
-      return { error: 'Invalid token', status: 401 };
-    }
-    return { merchantId: decoded.userId, apiKeyBusinessId: null };
-  } catch {
-    return { error: 'Invalid token', status: 401 };
+  if (auth.kind === 'oauth' && !options.allowOAuth) {
+    return { error: 'This endpoint requires a dashboard session or an API key', status: 403 };
   }
+  return { merchantId: auth.merchantId, apiKeyBusinessId: null };
 }
 
 async function resolveApiKey(

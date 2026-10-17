@@ -5,7 +5,7 @@ import {
   type CreateMerchantWalletInput,
 } from '@/lib/wallets/merchant-service';
 import { listUserWallets, type WalletSource } from '@/lib/wallets/user-wallets';
-import { resolveBearerAuth, hasScope } from '@/lib/auth/bearer';
+import { resolveBearerAuth, resolveMerchantBearer, hasScope } from '@/lib/auth/bearer';
 
 /** Scope an OAuth client must hold to read wallets. */
 const WALLET_READ_SCOPE = 'wallet:read';
@@ -47,7 +47,7 @@ function unauthorized(auth: { status: number; error: string; wwwAuthenticate?: s
 /** Parse and validate the `source` query param. */
 function parseSource(raw: string | null): WalletSource | 'all' | null {
   if (!raw) return 'all';
-  if (raw === 'account' || raw === 'business' || raw === 'all') return raw;
+  if (raw === 'account' || raw === 'business' || raw === 'web_wallet' || raw === 'all') return raw;
   return null;
 }
 
@@ -72,7 +72,8 @@ function createSupabaseClient() {
  * business, so account-level-only listing looked empty to OAuth clients.
  *
  * Query params:
- *   - `source=account|business|all` (default `all`)
+ *   - `source=account|business|web_wallet|all` (default `all`; web_wallet =
+ *     linked non-custodial web wallets)
  *   - `business_id=<uuid>` — only that business's wallets (implies business scope)
  */
 export async function GET(request: NextRequest) {
@@ -90,7 +91,7 @@ export async function GET(request: NextRequest) {
     const source = parseSource(searchParams.get('source'));
     if (!source) {
       return NextResponse.json(
-        { success: false, error: "Invalid source. Must be 'account', 'business', or 'all'" },
+        { success: false, error: "Invalid source. Must be 'account', 'business', 'web_wallet', or 'all'" },
         { status: 400 }
       );
     }
@@ -130,18 +131,15 @@ export async function GET(request: NextRequest) {
  * POST /api/wallets
  * Create a new global wallet for the authenticated merchant.
  *
- * Dashboard sessions only — no OAuth scope grants wallet writes, so third-party
- * access tokens are rejected here even though they may read wallets.
+ * A dashboard session, or an OAuth access token whose grant carries the
+ * `merchant` scope (acting as its `sub`). `wallet:read` alone does not grant
+ * writes: such a token gets 403 insufficient_scope.
  */
 export async function POST(request: NextRequest) {
   try {
-    const auth = verifyAuth(request);
+    const auth = resolveMerchantBearer(request.headers.get('authorization'));
     if (!auth.ok) {
       return unauthorized(auth);
-    }
-
-    if (auth.kind === 'oauth') {
-      return insufficientScope('wallet:write');
     }
 
     const body = await request.json();
@@ -160,7 +158,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await createMerchantWallet(supabase, auth.userId, input);
+    const result = await createMerchantWallet(supabase, auth.merchantId, input);
 
     if (!result.success) {
       return NextResponse.json(

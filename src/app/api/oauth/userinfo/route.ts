@@ -77,7 +77,8 @@ export async function GET(request: NextRequest) {
   // merchant_wallets (the /settings/wallets page) and per-business wallets in
   // business_wallets (Business > Wallets). Reading only the account-level table
   // returned nothing for the many users who keep addresses on a business, so
-  // OIDC clients silently got no wallets despite a valid grant. (The legacy
+  // OIDC clients silently got no wallets despite a valid grant. Web wallets the
+  // user linked (wallet_account_links) are included as source 'web_wallet'. (The legacy
   // `wallets` table is an HD-key store with no address column and is never a
   // source here.)
   if (scopes.includes('wallet:read')) {
@@ -90,6 +91,8 @@ export async function GET(request: NextRequest) {
         chain: w.cryptocurrency,
         label: w.label || w.business_name || undefined,
         business_id: w.business_id || undefined,
+        // 'account' | 'business' | 'web_wallet' (a linked non-custodial wallet)
+        source: w.source,
       }));
     }
   }
