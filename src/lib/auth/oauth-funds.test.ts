@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { hasScope, type MerchantAuthContext, type BusinessAuthContext } from './middleware';
 import { authorizeBusiness } from './authz';
 import { refuseOAuthFundsMove, withoutApiKeyForOAuth, OAUTH_CANNOT_MOVE_FUNDS } from './oauth-funds';
@@ -58,7 +59,7 @@ describe('helpers', () => {
   });
 
   it('withoutApiKeyForOAuth strips the key for OAuth only', () => {
-    const row = { id: 'b-1', api_key: 'fixture-business-key' };
+    const row = { id: 'b-1', api_key: randomUUID() };
     expect(withoutApiKeyForOAuth(row, oauth)).toEqual({ id: 'b-1' });
     expect(withoutApiKeyForOAuth(row, session)).toBe(row);
   });

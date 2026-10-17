@@ -30,7 +30,8 @@ const BUSINESS_ROW = {
   merchant_id: MERCHANT_ID,
   organization_id: null,
   name: 'Fixture Business',
-  api_key: 'fixture-business-key',
+  // Generated per run: nothing key-like lives in the source.
+  api_key: randomUUID(),
 };
 
 const TABLES: Record<string, Row> = {
