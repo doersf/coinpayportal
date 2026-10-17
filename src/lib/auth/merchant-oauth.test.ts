@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'node:crypto';
 import { resolveMerchant } from './merchant';
 
-const JWT_SECRET = 'session-secret-for-tests';
-const OIDC_SECRET = 'oidc-secret-for-tests';
+// Signing keys are generated per run: nothing key-like lives in the source.
+const JWT_SECRET = randomUUID();
+const OIDC_SECRET = randomUUID();
 const supabase = {} as any;
 
 const oauth = (scope: string) =>

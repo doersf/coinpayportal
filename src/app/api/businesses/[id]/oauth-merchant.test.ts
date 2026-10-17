@@ -6,6 +6,9 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'node:crypto';
+
+const WEBHOOK_FIXTURE = 'fixture-webhook-value';
 
 const OWNERS: Record<string, string> = {
   'biz-mine': 'merchant-9',
@@ -45,11 +48,11 @@ vi.mock('@/lib/auth/authz', () => {
 });
 
 vi.mock('@/lib/business/service', () => ({
-  getBusiness: vi.fn(async () => ({ success: true, business: { id: 'biz-mine', api_key: 'cp_live_x' } })),
+  getBusiness: vi.fn(async () => ({ success: true, business: { id: 'biz-mine', api_key: 'fixture-key-value' } })),
   updateBusiness: vi.fn(async () => ({ success: true, business: { id: 'biz-mine' } })),
   deleteBusiness: vi.fn(async () => ({ success: true })),
-  getWebhookSecret: vi.fn(async () => ({ success: true, secret: 'whsec_test' })),
-  regenerateWebhookSecret: vi.fn(async () => ({ success: true, secret: 'whsec_new' })),
+  getWebhookSecret: vi.fn(async () => ({ success: true, secret: WEBHOOK_FIXTURE })),
+  regenerateWebhookSecret: vi.fn(async () => ({ success: true, secret: WEBHOOK_FIXTURE })),
 }));
 
 vi.mock('@/lib/wallets/service', () => ({
@@ -69,8 +72,9 @@ import { updateBusiness, deleteBusiness, getWebhookSecret } from '@/lib/business
 import { createWallet } from '@/lib/wallets/service';
 import { importWalletsToBusiness } from '@/lib/wallets/merchant-service';
 
-const JWT_SECRET = 'session-secret-for-tests';
-const OIDC_SECRET = 'oidc-secret-for-tests';
+// Signing keys are generated per run: nothing key-like lives in the source.
+const JWT_SECRET = randomUUID();
+const OIDC_SECRET = randomUUID();
 
 const sessionToken = (userId = 'merchant-9') =>
   jwt.sign({ userId }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h' });
@@ -205,7 +209,7 @@ describe('GET /api/businesses/[id]/webhook-secret', () => {
   it('returns the secret for a merchant-scope OAuth token', async () => {
     const res = await webhookSecretRoute.GET(req(oauthToken(MERCHANT_SCOPES), 'GET'), params('biz-mine'));
     expect(res.status).toBe(200);
-    expect((await res.json()).secret).toBe('whsec_test');
+    expect((await res.json()).secret).toBe(WEBHOOK_FIXTURE);
   });
 
   it('refuses an OAuth token without the merchant scope', async () => {
