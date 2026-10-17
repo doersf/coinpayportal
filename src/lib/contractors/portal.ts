@@ -10,7 +10,7 @@ import {
   taxFormSchema,
   zodError,
 } from './service';
-import { notifyBusinessOfSubmission, notifyWalletChanged } from './notify';
+import { notifyBusinessOfSubmission, notifyContractSigned, notifyWalletChanged } from './notify';
 
 /**
  * The contractor's portal: everything one contractor needs from one business,
@@ -213,7 +213,7 @@ export async function runPortalAction(supabase: SupabaseClient, token: string, b
         .maybeSingle();
       if (!data) return bad('This contract is not waiting for your signature', 409);
       await supabase.from('contractors').update({ status: 'active' }).eq('id', contractor.id).eq('status', 'invited');
-      await notifyBusinessOfSubmission(supabase, contractor.business_id, contractor.name, `a signature on "${data.title}"`);
+      await notifyContractSigned(supabase, contractor.business_id, contractor.name, data.title);
       return { ok: true };
     }
 
