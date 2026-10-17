@@ -750,6 +750,14 @@ export async function runWorkerTick({
     result.errors.push(`email schedule: ${err instanceof Error ? err.message : String(err)}`);
   }
   try {
+    // Merchants who linked a bank without the daily summary (before it was
+    // on by default, or by a path that does not subscribe) get it here.
+    const { maybeBackfillDailySummaries } = await import('./daily-subscriptions');
+    await maybeBackfillDailySummaries();
+  } catch (err) {
+    result.errors.push(`daily summary backfill: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  try {
     const { enqueueScheduledStatementFetches } = await import('./cloud-statements');
     result.scheduled += await enqueueScheduledStatementFetches();
   } catch (err) {

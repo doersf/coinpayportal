@@ -95,13 +95,14 @@ export const TOOLS = [
   },
   {
     name: 'finance_daily_summary',
-    description: 'The daily summary email (due soon, new activity, position): show it, turn it on (optionally hour 0-23 and recipients), turn it off, or send one now.',
+    description: 'The daily summary email (spend vs a $/day target, top cuts, due soon, new activity, position): show it, turn it on (optionally hour 0-23 and recipients), turn it off, send one now, or set_target (target in $/day, null clears).',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['show', 'on', 'off', 'send_now'] },
+        action: { type: 'string', enum: ['show', 'on', 'off', 'send_now', 'set_target'] },
         hour: { type: 'integer', minimum: 0, maximum: 23 },
         to: { type: 'array', items: { type: 'string' }, maxItems: 5 },
+        target: { type: ['number', 'null'], minimum: 0 },
       },
       required: ['action'],
       additionalProperties: false,
@@ -110,7 +111,8 @@ export const TOOLS = [
       if (args.action === 'on') return text({ schedule: await reports.setDailySummary(client, { hour: args.hour, recipients: args.to, active: true }) });
       if (args.action === 'off') return text(await reports.deleteDailySummary(client));
       if (args.action === 'send_now') return text(await reports.sendDailySummaryNow(client));
-      return text({ schedule: await reports.getDailySummary(client) });
+      if (args.action === 'set_target') return text(await reports.setDailySpendTarget(client, args.target ?? null));
+      return text(await reports.getDailySummaryWithTarget(client));
     },
   },
   {

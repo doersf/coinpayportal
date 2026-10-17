@@ -1,4 +1,5 @@
 import { type AccountKind } from './classify';
+import { isCardPayoff, isInvestmentBuy, isLoanPayment } from './spend-rules';
 
 /**
  * Debt against income: the basic-accounting view of a linked feed.
@@ -332,7 +333,13 @@ function recurrenceSide(row: RecurrenceRow): 'charge' | 'debt' | null {
     // that is internally categorised (a balance transfer) is not a bill.
     return INTERNAL_CATEGORIES.has(String(row.tx.category ?? '')) ? null : 'charge';
   }
-  return row.tx.amount < 0 ? 'charge' : null;
+  if (row.tx.amount >= 0) return null;
+  // From a deposit account: paying off a card or a loan is debt service even
+  // when the categoriser missed it ("AMEX EPAYMENT" reads as a withdrawal), and
+  // a standing brokerage buy is not an obligation at all.
+  if (isInvestmentBuy(row.tx, row.account)) return null;
+  if (isCardPayoff(row.tx, row.account) || isLoanPayment(row.tx)) return 'debt';
+  return 'charge';
 }
 
 function detectRecurring(rows: RecurrenceRow[], now: Date): RecurringCharge[] {

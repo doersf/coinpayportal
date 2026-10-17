@@ -682,7 +682,7 @@ ${colors.cyan}Commands:${colors.reset}
     due [--days 7]        What is due and overdue across every account (--days up to 60)
     recurring             Every recurring charge detected, with next date and monthly cost
     due-day <id> <1-31|clear>  A card/loan's statement due day (--amount 810.46, or balance)
-    daily [show|on|off|send-now]  Daily summary email: due soon, new activity, position (--hour 7 --to …)
+    daily [show|on|off|send-now]  Daily summary email: spend vs target, top cuts, due soon, position (--hour 7 --to …, --target 100)
 
   ${colors.bright}escrow${colors.reset}
     create                Create a new escrow

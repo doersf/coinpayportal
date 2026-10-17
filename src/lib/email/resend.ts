@@ -17,6 +17,8 @@ export interface SendEmailInput {
   replyTo?: string;
   /** Files to attach. Kept small by callers; providers cap a message around 40 MB. */
   attachments?: EmailAttachment[];
+  /** Extra headers, e.g. List-Unsubscribe. */
+  headers?: Record<string, string>;
 }
 
 export interface SendEmailResult {
@@ -94,6 +96,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
         subject: input.subject,
         html: input.html,
         reply_to: input.replyTo || replyTo,
+        ...(input.headers && Object.keys(input.headers).length > 0 ? { headers: input.headers } : {}),
         ...(input.attachments && input.attachments.length > 0
           ? {
               attachments: input.attachments.map((a) => ({

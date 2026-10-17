@@ -17,6 +17,8 @@ export interface SendEmailInput {
   replyTo?: string;
   /** Files to attach. Kept small by callers; providers cap a message around 40 MB. */
   attachments?: EmailAttachment[];
+  /** Extra headers, e.g. List-Unsubscribe. */
+  headers?: Record<string, string>;
 }
 
 export interface SendEmailResult {
@@ -96,6 +98,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
     formData.append('subject', input.subject);
     formData.append('html', input.html);
     formData.append('h:Reply-To', input.replyTo || replyTo);
+    for (const [name, value] of Object.entries(input.headers ?? {})) formData.append(`h:${name}`, value);
     for (const a of input.attachments ?? []) {
       formData.append('attachment', new Blob([new Uint8Array(a.content)], { type: a.contentType || 'application/octet-stream' }), a.filename);
     }

@@ -461,12 +461,27 @@ export async function getDailySummary(client) {
   return data.schedule;
 }
 
+/** The daily summary schedule plus the owner's $/day spend target (null when none). */
+export async function getDailySummaryWithTarget(client) {
+  const data = await call(client, '/finances/email-schedules?kind=daily_summary');
+  return { schedule: data.schedule, target: data.dailySpendTarget ?? null };
+}
+
 export async function setDailySummary(client, { weekdays, hour, timezone, recipients, active } = {}) {
   const data = await call(client, '/finances/email-schedules', {
     method: 'POST',
     body: JSON.stringify({ kind: 'daily_summary', weekdays, hour, timezone, recipients, active }),
   });
   return data.schedule;
+}
+
+/** Set the daily summary's $/day spend target, or clear it with null. Does not turn the summary on. */
+export async function setDailySpendTarget(client, target) {
+  const data = await call(client, '/finances/email-schedules', {
+    method: 'POST',
+    body: JSON.stringify({ kind: 'daily_summary', target }),
+  });
+  return { schedule: data.schedule, target: data.dailySpendTarget ?? null };
 }
 
 export async function deleteDailySummary(client) {
