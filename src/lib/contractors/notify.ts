@@ -99,6 +99,25 @@ Approved work goes into the next pay run.</p>`,
   );
 }
 
+export async function notifyContractSigned(
+  supabase: SupabaseClient,
+  businessId: string,
+  contractorName: string,
+  contractTitle: string
+) {
+  const biz = await businessContacts(supabase, businessId);
+  await send(
+    biz.ownerEmail,
+    `${contractorName} signed "${contractTitle}"`,
+    layout(
+      'Contract signed',
+      `<p>${escapeHtml(contractorName)} countersigned <strong>${escapeHtml(contractTitle)}</strong> with ${escapeHtml(biz.name)}.
+The contract is active: they can now submit work against it, and fixed fees start on the first pay date.</p>`,
+      { href: `${appUrl()}/contractors`, label: 'Open contractors' }
+    )
+  );
+}
+
 export async function notifyWalletChanged(
   supabase: SupabaseClient,
   contractor: { business_id: string; name: string; email: string },
