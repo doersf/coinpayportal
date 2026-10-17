@@ -511,6 +511,7 @@ describe('Wallet Service', () => {
         'USDT_ETH',
         'USDT_POL',
         'USDT_SOL',
+        'USDT_TRON',
         'USDC',
         'USDC_ETH',
         'USDC_POL',

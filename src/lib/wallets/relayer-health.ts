@@ -24,7 +24,8 @@ import {
   currentGasPrice,
   type RelayerUnderfundedError,
 } from './evm-gas';
-import { deriveGasRelayerWallet, type SystemBlockchain } from './system-wallet';
+import { deriveGasRelayerWallet, deriveTronRelayerWallet, isUsdtTronEnabled, type SystemBlockchain } from './system-wallet';
+import { getTrxBalanceSun, SUN_PER_TRX } from '@/lib/tron/client';
 
 const HOUR = 60 * 60 * 1000;
 
@@ -41,6 +42,9 @@ export const RELAYER_WARN_SWEEPS = 10n;
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
 function networkFor(chain: SystemBlockchain) {
+  // TRON's relayer is not an EVM account, so it is not in RELAYER_NETWORKS
+  // (the float check reads those with ethers); it still needs a label here.
+  if (chain === 'USDT_TRON') return { network: 'TRON', chain, native: 'TRX' };
   return RELAYER_NETWORKS.find((n) => n.chain.split('_')[1] === chain.split('_')[1]);
 }
 
@@ -127,6 +131,36 @@ export async function checkRelayerFloats(
       }
     } catch (error) {
       console.error(`[RelayerHealth] ${network} check failed:`, error);
+    }
+  }
+
+  // TRON: only once USDT on TRON is switched on, so an unconfigured instance
+  // does not get a "relayer low" email for a chain it does not use.
+  if (isUsdtTronEnabled()) {
+    try {
+      const { address } = deriveTronRelayerWallet();
+      const balanceSun = await getTrxBalanceSun(address, { solidified: false });
+      // ~16 TRX covers one sweep at today's energy price; warn under 10 sweeps.
+      const warnBelowSun = 160n * SUN_PER_TRX;
+      const low = balanceSun < warnBelowSun;
+      // Reported in the wei-shaped fields scaled by 1e12 so formatEther reads TRX.
+      floats.push({ network: 'TRON', address, balanceWei: balanceSun * 10n ** 12n, warnBelowWei: warnBelowSun * 10n ** 12n, low });
+      if (low) {
+        const trx = (Number(balanceSun) / 1e6).toString();
+        await sendOpsAlert(supabase, {
+          key: 'relayer-low:TRON',
+          throttleMs: 12 * HOUR,
+          subject: `CoinPay: TRON gas relayer is low (${trx} TRX)`,
+          html: alertHtml([
+            'The TRON gas relayer pays the energy for every USDT (TRC-20) payment forwarded on TRON.',
+            `Relayer: <code>${escapeHtml(address)}</code><br>Balance: ${escapeHtml(trx)} TRX<br>` +
+              `Enough for ${RELAYER_WARN_SWEEPS} sweeps: ~${Number(warnBelowSun) / 1e6} TRX`,
+            'When it runs out, USDT payments on TRON confirm but wait to forward until it is topped up.',
+          ]),
+        });
+      }
+    } catch (error) {
+      console.error('[RelayerHealth] TRON check failed:', error);
     }
   }
   return floats;

@@ -330,6 +330,16 @@ describe('Unified Payment Creation - POST /api/payments/create', () => {
       });
     });
 
+    it('refuses USDT on TRON until the platform TRON fee wallet is configured', async () => {
+      delete process.env.PLATFORM_FEE_WALLET_USDT_TRON;
+      delete process.env.PLATFORM_FEE_WALLET_TRON;
+      const response = await POST(makeRequest({ business_id: 'biz_123', amount_usd: 5, currency: 'usdt_trc20' }));
+      const data = await response.json();
+      expect(response.status).toBe(400);
+      expect(data.code).toBe('CHAIN_NOT_ENABLED');
+      expect(mockCreatePayment).not.toHaveBeenCalled();
+    });
+
     it('should create a crypto payment when payment_method=crypto', async () => {
       mockCreatePayment.mockResolvedValue({
         success: true,

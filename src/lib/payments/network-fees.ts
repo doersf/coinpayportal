@@ -16,7 +16,7 @@ export const STATIC_NETWORK_FEES_USD = getStaticFees();
 export type Blockchain =
   | 'BTC' | 'BCH' | 'ETH' | 'POL' | 'SOL'
   | 'DOGE' | 'XRP' | 'ADA' | 'BNB'
-  | 'USDT' | 'USDT_ETH' | 'USDT_POL' | 'USDT_SOL'
+  | 'USDT' | 'USDT_ETH' | 'USDT_POL' | 'USDT_SOL' | 'USDT_TRON'
   | 'USDC'
   | 'USDC_ETH' | 'USDC_POL' | 'USDC_SOL' | 'USDC_BASE';
 

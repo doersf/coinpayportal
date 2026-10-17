@@ -207,6 +207,31 @@ async function estimateSolanaFee(): Promise<number> {
 }
 
 /**
+ * USDT (TRC-20) sweep cost in USD.
+ *
+ * A sweep is two token transfers (merchant, then platform) out of a brand-new
+ * deposit address, paid for in TRX the gas relayer sends it first. Each
+ * transfer to an address that already holds USDT burns ~64,285 energy (to one
+ * that never has, ~130k); activating the new deposit account costs the relayer
+ * 1.1 TRX, and each transfer ~350 bytes of bandwidth. Energy and bandwidth
+ * prices are read from the chain, so a governance change to the energy price
+ * moves the quote with it.
+ */
+export const TRON_TRANSFER_ENERGY = 64_285;
+export const TRON_SWEEP_TRANSFERS = 2;
+
+async function estimateTronUsdtFee(): Promise<number> {
+  const { getChainFees } = await import('@/lib/tron/client');
+  const { energyFeeSun, bandwidthFeeSun } = await getChainFees();
+  const sun =
+    BigInt(TRON_TRANSFER_ENERGY * TRON_SWEEP_TRANSFERS) * energyFeeSun +
+    BigInt(350 * TRON_SWEEP_TRANSFERS) * bandwidthFeeSun +
+    1_100_000n; // account activation + the top-up's own bandwidth
+  const trxPrice = await getExchangeRate('TRX', 'USD');
+  return (Number(sun) / 1e6) * trxPrice;
+}
+
+/**
  * Get estimated network fee for a blockchain in USD
  * Uses Tatum API for real-time estimates with caching
  * 
@@ -256,6 +281,9 @@ export async function getEstimatedNetworkFee(blockchain: string): Promise<number
     case 'USDC':
       // Stablecoins on Ethereum, use ETH fee estimate
       fee = await estimateEthereumFee();
+      break;
+    case 'TRON':
+      fee = await estimateTronUsdtFee();
       break;
     default:
       throw new Error(`Unsupported blockchain for fee estimation: ${baseChain}`);

@@ -49,3 +49,13 @@ describe('isValidPayoutAddress', () => {
     expect(isValidPayoutAddress('whatever', 'ADA')).toBeNull();
   });
 });
+
+describe('isValidPayoutAddress — USDT on TRON', () => {
+  it('checks the full base58check, not just the shape', () => {
+    expect(isValidPayoutAddress('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', 'USDT_TRON')).toBe(true);
+    // One character off: right shape, wrong checksum.
+    expect(isValidPayoutAddress('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6u', 'USDT_TRON')).toBe(false);
+    // An EVM address pasted for TRON.
+    expect(isValidPayoutAddress('0xdAC17F958D2ee523a2206206994597C13D831ec7', 'USDT_TRON')).toBe(false);
+  });
+});

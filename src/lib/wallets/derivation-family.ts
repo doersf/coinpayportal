@@ -50,12 +50,12 @@ export const PLATFORM_ARBITER_DERIVATION_INDEX = 0;
 export type SystemBlockchain =
   | 'BTC' | 'BCH' | 'ETH' | 'POL' | 'SOL'
   | 'DOGE' | 'XRP' | 'ADA' | 'BNB'
-  | 'USDT' | 'USDT_ETH' | 'USDT_POL' | 'USDT_SOL'
+  | 'USDT' | 'USDT_ETH' | 'USDT_POL' | 'USDT_SOL' | 'USDT_TRON'
   | 'USDC' | 'USDC_ETH' | 'USDC_POL' | 'USDC_SOL' | 'USDC_BASE';
 
 const ALL_CRYPTOS: SystemBlockchain[] = [
   'BTC', 'BCH', 'ETH', 'POL', 'SOL', 'DOGE', 'XRP', 'ADA', 'BNB',
-  'USDT', 'USDT_ETH', 'USDT_POL', 'USDT_SOL',
+  'USDT', 'USDT_ETH', 'USDT_POL', 'USDT_SOL', 'USDT_TRON',
   'USDC', 'USDC_ETH', 'USDC_POL', 'USDC_SOL', 'USDC_BASE',
 ];
 
@@ -76,6 +76,10 @@ export function getDerivationFamily(cryptocurrency: SystemBlockchain): string {
     case 'USDT_SOL':
     case 'USDC_SOL':
       return 'SOL';
+    // TRON keys live at m/44'/195'/0'/0/i; a future TRX or USDC on TRON
+    // would share this address space.
+    case 'USDT_TRON':
+      return 'TRON';
     default:
       return cryptocurrency;
   }

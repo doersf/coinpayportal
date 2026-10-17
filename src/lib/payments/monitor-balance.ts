@@ -7,6 +7,7 @@
 import { isSufficientPayment } from './tolerance';
 import { sendPaymentWebhook } from '@/lib/webhooks/service';
 import { fetchWithTimeout } from '@/lib/http/fetch-timeout';
+import { getUsdtTronBalance } from '@/lib/tron/client';
 import { evmRpcCall, type EvmBaseChain } from '@/lib/web-wallet/evm-rpc';
 
 // RPC endpoints for different blockchains
@@ -704,6 +705,13 @@ export async function checkBalance(address: string, blockchain: string): Promise
       return checkSolanaTokenBalance(address, RPC_ENDPOINTS.SOL, SOLANA_TOKENS.USDT_SOL.mintAddress, SOLANA_TOKENS.USDT_SOL.decimals);
     case 'USDC_SOL':
       return checkSolanaTokenBalance(address, RPC_ENDPOINTS.SOL, SOLANA_TOKENS.USDC_SOL.mintAddress, SOLANA_TOKENS.USDC_SOL.decimals);
+    case 'USDT_TRON':
+      try {
+        return { balance: await getUsdtTronBalance(address) };
+      } catch (error) {
+        console.error(`[Monitor] USDT_TRON balance lookup failed for ${address}:`, error);
+        return { balance: 0, error: error instanceof Error ? error.message : 'USDT_TRON balance lookup failed' };
+      }
     case 'BNB':
       return checkBNBBalance(address);
     case 'DOGE':

@@ -8,6 +8,8 @@
  * network before it gets used as a forwarding destination.
  */
 
+import { isValidTronAddress } from '@/lib/tron/address-codec';
+
 /**
  * Map a payment blockchain (which may be a token variant like USDC_SOL) to the
  * base chain whose address format we validate against. Bare stablecoin tickers
@@ -61,6 +63,10 @@ export function isValidPayoutAddress(address: string, blockchain: string): boole
         /^(bitcoincash:)?[qp][a-z0-9]{41,90}$/.test(address) ||
         /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(address)
       );
+    case 'TRON':
+      // Full base58check: a mistyped character fails the checksum here
+      // instead of sending USDT to an address nobody holds.
+      return isValidTronAddress(address);
     default:
       return null; // DOGE/XRP/ADA/BNB — no format validator; trust the caller.
   }

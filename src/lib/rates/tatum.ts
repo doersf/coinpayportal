@@ -31,6 +31,7 @@ const KRAKEN_PAIR_MAP: Record<string, string> = {
   'XRP': 'XXRPZUSD',
   'ADA': 'ADAUSD',
   'BNB': 'BNBUSD',
+  'TRX': 'TRXUSD',
 };
 
 /**
@@ -41,7 +42,7 @@ const KRAKEN_PAIR_MAP: Record<string, string> = {
  * Tatum is only used for chains NOT in KRAKEN_PAIR_MAP.
  */
 const USE_KRAKEN = Object.keys(KRAKEN_PAIR_MAP).concat([
-  'USDC_POL', 'USDC_MATIC', 'USDT_ETH', 'USDT_SOL', 'USDT_POL', 'USDC_ETH', 'USDC_SOL',
+  'USDC_POL', 'USDC_MATIC', 'USDT_ETH', 'USDT_SOL', 'USDT_TRON', 'USDT_POL', 'USDC_ETH', 'USDC_SOL',
 ]);
 
 /**
