@@ -67,6 +67,32 @@ export function Preview({ bytes, contentType, title }: { bytes: Uint8Array; cont
   return <img src={url} alt={title} className="max-w-full rounded-lg border border-gray-700 bg-white mx-auto" />;
 }
 
+/** The drawing cropped to its ink (plus a margin), so it fills the certificate instead of the pad. */
+function trimmed(c: HTMLCanvasElement): string {
+  const { data, width, height } = c.getContext('2d')!.getImageData(0, 0, c.width, c.height);
+  let top = height, left = width, right = -1, bottom = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (!data[(y * width + x) * 4 + 3]) continue;
+      if (x < left) left = x;
+      if (x > right) right = x;
+      if (y < top) top = y;
+      if (y > bottom) bottom = y;
+    }
+  }
+  if (right < 0) return c.toDataURL('image/png');
+  const pad = 6;
+  left = Math.max(0, left - pad);
+  top = Math.max(0, top - pad);
+  const w = Math.min(width, right + pad) - left;
+  const h = Math.min(height, bottom + pad) - top;
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  out.getContext('2d')!.drawImage(c, left, top, w, h, 0, 0, w, h);
+  return out.toDataURL('image/png');
+}
+
 /** A drawn signature. Returns a PNG data URL, or null while the pad is empty. */
 export function SignaturePad({ onChange }: { onChange: (dataUrl: string | null) => void }) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -111,7 +137,7 @@ export function SignaturePad({ onChange }: { onChange: (dataUrl: string | null) 
   const end = () => {
     if (!drawing.current) return;
     drawing.current = false;
-    if (dirty.current && canvas.current) onChange(canvas.current.toDataURL('image/png'));
+    if (dirty.current && canvas.current) onChange(trimmed(canvas.current));
   };
   const clear = () => {
     const c = canvas.current;

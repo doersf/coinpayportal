@@ -262,7 +262,9 @@ export async function buildSignedPdf(input: CertificateInput): Promise<Uint8Arra
   for (const e of events) {
     const who = e.actor_label ? ` · ${e.actor_label}` : '';
     const where = e.ip ? ` · ${e.ip}` : '';
-    w.text(`${utc(e.created_at)}  ${EVENT_LABEL[e.event] ?? e.event}${who}${where}`, { size: 8.5 });
+    const [kind, version] = e.event.split(':');
+    const label = kind === 'version_added' && version ? `Version ${version} uploaded` : EVENT_LABEL[kind] ?? kind;
+    w.text(`${utc(e.created_at)}  ${label}${who}${where}`, { size: 8.5 });
   }
   w.gap(10);
   w.text(
