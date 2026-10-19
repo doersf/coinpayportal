@@ -238,6 +238,14 @@ export default function Footer() {
                     className="h-16"
                   />
                 </Link>
+                <a href="https://built.indie.pit.world/p/coinpay?ref=badge">
+                  <img
+                    src="https://built.indie.pit.world/badge/coinpay.svg"
+                    alt="CoinPay on built.indie"
+                    width="200"
+                    height="44"
+                  />
+                </a>
               </div>
             </div>
           </div>
