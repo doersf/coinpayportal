@@ -29,6 +29,7 @@ export async function GET(
         businesses (id, name, description),
         invoice_schedules (*)
       `,
+      { allowOAuth: true },
     );
     if (!access.ok) {
       return NextResponse.json({ success: false, error: access.error }, { status: access.status });

@@ -74,7 +74,8 @@ describe('POST /api/invoices/[id]/publish', () => {
       expect.any(NextRequest),
       'inv-1',
       'invoice.write',
-      expect.any(String)
+      expect.any(String),
+      { allowOAuth: true },
     );
     expect(activateInvoicePayment).toHaveBeenCalledWith(mockSupabase, draftInvoice);
   });

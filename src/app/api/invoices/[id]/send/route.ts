@@ -32,6 +32,7 @@ export async function POST(
         clients (id, name, email, company_name),
         businesses (id, name, merchant_id)
       `,
+      { allowOAuth: true },
     );
     if (!access.ok) {
       return NextResponse.json({ success: false, error: access.error }, { status: access.status });

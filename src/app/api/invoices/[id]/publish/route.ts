@@ -24,7 +24,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         *,
         clients (id, name, email, company_name),
         businesses (id, name, merchant_id)
-      `
+      `,
+      { allowOAuth: true },
     );
 
     if (!access.ok) {
