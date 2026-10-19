@@ -31,6 +31,7 @@ export async function POST(
         clients (id, name, email, company_name),
         businesses (id, name)
       `,
+      { allowOAuth: true },
     );
 
     if (!access.ok) {

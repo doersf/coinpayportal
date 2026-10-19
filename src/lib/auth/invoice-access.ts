@@ -43,8 +43,12 @@ export async function authorizeInvoice(
   invoiceId: string,
   capability: Capability,
   select = '*',
+  options: { allowOAuth?: boolean } = {},
 ): Promise<InvoiceAccessOk | InvoiceAccessErr> {
-  const auth = await resolveMerchant(supabase, request);
+  // `allowOAuth` lets a merchant-scope OAuth token in (pay.agent invoicing).
+  // authorizeBusiness still refuses `funds.move` to it, so a route that names
+  // a payout address or marks an invoice paid stays dashboard/API-key only.
+  const auth = await resolveMerchant(supabase, request, options);
   if ('error' in auth) return { ok: false, status: auth.status, error: auth.error };
   const { merchantId, apiKeyBusinessId, via } = auth;
 

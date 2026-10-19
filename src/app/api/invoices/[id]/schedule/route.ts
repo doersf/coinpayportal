@@ -30,7 +30,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const { id } = await params;
     const supabase = serviceClient();
 
-    const access = await authorizeInvoice(supabase, request, id, 'business.read', 'id, business_id');
+    const access = await authorizeInvoice(supabase, request, id, 'business.read', 'id, business_id', { allowOAuth: true });
     if (!access.ok) {
       return NextResponse.json({ success: false, error: access.error }, { status: access.status });
     }
@@ -66,7 +66,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const supabase = serviceClient();
     const body = await request.json().catch(() => ({}));
 
-    const access = await authorizeInvoice(supabase, request, id, 'invoice.write', 'id, business_id');
+    const access = await authorizeInvoice(supabase, request, id, 'invoice.write', 'id, business_id', { allowOAuth: true });
     if (!access.ok) {
       return NextResponse.json({ success: false, error: access.error }, { status: access.status });
     }
@@ -140,7 +140,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const { id } = await params;
     const supabase = serviceClient();
 
-    const access = await authorizeInvoice(supabase, request, id, 'invoice.write', 'id, business_id');
+    const access = await authorizeInvoice(supabase, request, id, 'invoice.write', 'id, business_id', { allowOAuth: true });
     if (!access.ok) {
       return NextResponse.json({ success: false, error: access.error }, { status: access.status });
     }
