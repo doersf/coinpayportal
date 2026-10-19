@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authFetch } from '@/lib/auth/client';
@@ -84,7 +84,6 @@ export default function PaymentHistoryPage() {
 
   useEffect(() => {
     fetchBusinesses();
-    fetchPayments();
   }, []);
 
   useEffect(() => {
@@ -106,7 +105,12 @@ export default function PaymentHistoryPage() {
     }
   };
 
+  // Filters fire overlapping fetches; only the newest may update the table, or a
+  // slow unfiltered load lands after a filtered one and shows the wrong rows.
+  const fetchSeq = useRef(0);
+
   const fetchPayments = async () => {
+    const seq = ++fetchSeq.current;
     try {
       setLoading(true);
       
@@ -134,6 +138,8 @@ export default function PaymentHistoryPage() {
         wantCard ? authFetch(`/api/stripe/transactions?${cardParams}`, {}, router) : null,
       ]);
 
+      if (seq !== fetchSeq.current) return;
+
       // Process crypto results
       if (cryptoResults && cryptoResults.response.ok && cryptoResults.data.success) {
         setCryptoPayments(cryptoResults.data.payments || []);
@@ -152,7 +158,7 @@ export default function PaymentHistoryPage() {
       console.error('Error fetching payments:', error);
       setError('Failed to load payment history');
     } finally {
-      setLoading(false);
+      if (seq === fetchSeq.current) setLoading(false);
     }
   };
 
