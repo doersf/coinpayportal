@@ -127,8 +127,10 @@ export {
   voidDocument,
   deleteDocument,
   downloadDocument,
+  listDocumentVersions,
+  uploadDocumentVersion,
 } from './documents.js';
-export type { CoinPayDocument, DocumentRecipient, DocumentVault, UnlockedVault } from './documents.js';
+export type { CoinPayDocument, DocumentRecipient, DocumentVault, DocumentVersion, UnlockedVault } from './documents.js';
 
 // Webhook exports
 export {

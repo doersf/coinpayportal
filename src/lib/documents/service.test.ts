@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { contentTypeFor, signedFilename, cleanFilename, SEAL_OVERHEAD } from './types';
-import { hashToken, newSignToken, SIGN_TOKEN_PATTERN, shareSchema, signActionSchema, statusFor, uploadMetaSchema } from './service';
+import { hashToken, newSignToken, SIGN_TOKEN_PATTERN, shareSchema, signActionSchema, statusFor, uploadMetaSchema, versionMetaSchema } from './service';
 
 const signer = (status: string, revoked = false) => ({ role: 'signer' as const, status: status as 'pending', revoked_at: revoked ? '2026-10-19T00:00:00Z' : null });
 const viewer = { role: 'viewer' as const, status: 'pending' as const, revoked_at: null };
@@ -57,6 +57,18 @@ describe('documents service', () => {
     expect(uploadMetaSchema.safeParse(meta).success).toBe(true);
     expect(uploadMetaSchema.safeParse({ ...meta, content_type: 'text/html' }).success).toBe(false);
     expect(uploadMetaSchema.safeParse({ ...meta, document_key: 'A'.repeat(43) }).success).toBe(false);
+  });
+
+  it('invites editors and validates new versions', () => {
+    const editor = shareSchema.safeParse({ recipients: [{ name: 'E', email: 'e@example.com', role: 'editor' }] });
+    expect(editor.success && editor.data.recipients[0].role).toBe('editor');
+    expect(shareSchema.safeParse({ recipients: [{ name: 'E', email: 'e@example.com', role: 'owner' }] }).success).toBe(false);
+    // Editors count like viewers for status: they never block completion.
+    expect(statusFor('draft', [{ role: 'editor', status: 'pending', revoked_at: null }])).toBe('shared');
+    expect(statusFor('out_for_signature', [signer('signed'), { role: 'editor', status: 'viewed', revoked_at: null }])).toBe('completed');
+    const v = { version: 2, filename: 'v2.pdf', content_type: 'application/pdf', bytes: 10, sha256: 'd'.repeat(64), note: 'tightened clause 4' };
+    expect(versionMetaSchema.safeParse(v).success).toBe(true);
+    expect(versionMetaSchema.safeParse({ ...v, version: 1 }).success).toBe(false);
   });
 
   it('dedupes nothing silently: the email key option is the only key the server accepts', () => {

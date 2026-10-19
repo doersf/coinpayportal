@@ -20,11 +20,13 @@ import { ALLOWED_CONTENT_TYPES, MAX_DOCUMENT_BYTES } from './types';
  */
 
 export const DOCUMENT_COLUMNS =
-  'id, business_id, title, message, filename, content_type, bytes, sha256, wrapped_key, vault_version, status, signed_sha256, signed_bytes, ' +
+  'id, business_id, title, message, filename, content_type, bytes, sha256, wrapped_key, vault_version, current_version, status, ' +
+  'signed_sha256, signed_bytes, ' +
   'completed_at, voided_at, void_reason, created_at, updated_at';
 export const RECIPIENT_COLUMNS =
   'id, document_id, name, email, role, status, sent_at, viewed_at, consented_at, signed_at, signature_name, ' +
   'signature_ip, signed_document_sha256, declined_at, decline_reason, expires_at, revoked_at, created_at';
+export const VERSION_COLUMNS = 'version, filename, content_type, bytes, sha256, note, uploaded_by, created_at';
 export const EVENT_COLUMNS = 'id, recipient_id, actor, event, actor_label, ip, user_agent, detail, created_at';
 
 export type DocumentStatus = 'draft' | 'shared' | 'out_for_signature' | 'completed' | 'declined' | 'voided';
@@ -40,6 +42,7 @@ export interface DocumentRow {
   sha256: string;
   wrapped_key: string;
   vault_version: number;
+  current_version: number;
   object_key: string;
   status: DocumentStatus;
   signed_object_key: string | null;
@@ -56,7 +59,7 @@ export interface RecipientRow {
   business_id: string;
   name: string;
   email: string;
-  role: 'signer' | 'viewer';
+  role: 'signer' | 'viewer' | 'editor';
   status: 'pending' | 'viewed' | 'signed' | 'declined';
   sent_at: string | null;
   viewed_at: string | null;
@@ -104,7 +107,8 @@ export const recipientInput = z
   .object({
     name: z.string().trim().min(1).max(200),
     email: z.string().trim().toLowerCase().email().max(320),
-    role: z.enum(['signer', 'viewer']).default('signer'),
+    // viewer: open and download; editor: also upload new versions; signer: sign.
+    role: z.enum(['signer', 'viewer', 'editor']).default('signer'),
     expires_in_days: z.number().int().min(1).max(365).nullable().optional(),
   })
   .strict();
@@ -148,6 +152,18 @@ export const vaultSchema = z
     kdf_salt: z.string().regex(/^[A-Za-z0-9_-]{16,64}$/),
     kdf_iterations: z.number().int().min(100_000).max(10_000_000),
     wrapped_key: wrappedKey,
+  })
+  .strict();
+
+/** A new version, sealed under the document key with its number in the AAD. */
+export const versionMetaSchema = z
+  .object({
+    version: z.number().int().min(2),
+    filename: z.string().min(1).max(255),
+    content_type: z.string().refine((t) => ALLOWED_CONTENT_TYPES.has(t), 'Unsupported file type'),
+    bytes: z.number().int().positive().max(MAX_DOCUMENT_BYTES),
+    sha256,
+    note: z.string().trim().max(1000).nullable().optional(),
   })
   .strict();
 

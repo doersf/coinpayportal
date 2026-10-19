@@ -78,6 +78,8 @@ import {
   voidDocument,
   deleteDocument,
   downloadDocument,
+  listDocumentVersions,
+  uploadDocumentVersion,
 } from '../src/documents.js';
 import { readFileSync, writeFileSync, existsSync, unlinkSync, chmodSync } from 'fs';
 import { execSync, spawn } from 'child_process';
@@ -551,13 +553,15 @@ ${colors.cyan}Commands:${colors.reset}
     vault-setup           Create the documents passphrase (--business-id, admins)
     list                  Documents (--business-id) with signing progress
     upload <file>         Encrypt and upload: --business-id [--title] [--message]
-    share <id>            --signers "Ada <ada@x.com>, bob@y.com" [--viewers "..."]
+    share <id>            --signers "Ada <ada@x.com>, bob@y.com" [--editors "..."] [--viewers "..."]
                           [--message] [--no-email] [--email-key puts the key in the email]
                           Prints each full link (with #k= key): send it privately
     get <id>              Status, people and audit trail
     link <id> <recipient> New link for one person (old one stops working)
     revoke <id> <recipient>  Remove someone who has not signed
-    download <id>         Decrypt to a file [--signed] [--out path]
+    versions <id>         The history: every uploaded version
+    new-version <id> <file>  Encrypt and upload the next version [--note]
+    download <id>         Decrypt to a file [--signed | --revision N] [--out path]
     void <id>             [--reason]    delete <id>
                           Passphrase: COINPAY_DOCUMENTS_PASSPHRASE or a hidden prompt
 
@@ -1324,7 +1328,7 @@ async function documentsVault(client, businessId) {
 
 async function handleDocument(subcommand, args, flags) {
   const client = createClient();
-  requireFlagValues(flags, ['business-id', 'title', 'message', 'signers', 'viewers', 'reason', 'out']);
+  requireFlagValues(flags, ['business-id', 'title', 'message', 'signers', 'viewers', 'editors', 'reason', 'out', 'note', 'revision']);
   switch (subcommand) {
     case 'vault-setup': {
       if (!flags['business-id']) usageExit('coinpay document vault-setup --business-id <id>');
@@ -1360,8 +1364,8 @@ async function handleDocument(subcommand, args, flags) {
       return print.info('Send it with: coinpay document share ' + doc.id + ' --signers "Name <email>"');
     }
     case 'share': {
-      const recipients = [...parsePeople(flags.signers, 'signer'), ...parsePeople(flags.viewers, 'viewer')];
-      if (args.length !== 1 || !recipients.length) usageExit('coinpay document share <id> --signers "Ada <ada@x.com>" [--viewers "..."] [--message] [--no-email] [--email-key]');
+      const recipients = [...parsePeople(flags.signers, 'signer'), ...parsePeople(flags.editors, 'editor'), ...parsePeople(flags.viewers, 'viewer')];
+      if (args.length !== 1 || !recipients.length) usageExit('coinpay document share <id> --signers "Ada <ada@x.com>" [--editors "..."] [--viewers "..."] [--message] [--no-email] [--email-key]');
       const { document } = await getDocument(client, args[0]);
       const vault = await documentsVault(client, document.business_id);
       const result = await shareDocument(client, args[0], {
@@ -1403,11 +1407,29 @@ async function handleDocument(subcommand, args, flags) {
       const result = await revokeDocumentRecipient(client, args[0], args[1]);
       return flags.json ? print.json(result) : print.success('Revoked; document is now ' + result.status);
     }
-    case 'download': {
-      if (args.length !== 1) usageExit('coinpay document download <id> [--signed] [--out path]');
+    case 'versions': {
+      if (args.length !== 1) usageExit('coinpay document versions <id>');
+      const rows = await listDocumentVersions(client, args[0]);
+      if (flags.json) return print.json(rows);
+      for (const v of rows) print.info('v' + v.version + '  ' + v.created_at + '  ' + v.filename + '  ' + v.bytes + ' bytes' + (v.uploaded_by ? '  ' + v.uploaded_by : '') + (v.note ? '  ' + v.note : ''));
+      return;
+    }
+    case 'new-version': {
+      if (args.length !== 2) usageExit('coinpay document new-version <id> <file> [--note "what changed"]');
       const { document } = await getDocument(client, args[0]);
       const vault = await documentsVault(client, document.business_id);
-      const file = await downloadDocument(client, args[0], { version: flags.signed ? 'signed' : 'original', vault });
+      const result = await uploadDocumentVersion(client, args[0], { vault, bytes: readFileSync(args[1]), filename: args[1], note: flags.note });
+      return flags.json ? print.json(result) : print.success('Uploaded version ' + result.version + ' (encrypted)');
+    }
+    case 'download': {
+      if (args.length !== 1) usageExit('coinpay document download <id> [--signed | --revision N] [--out path]');
+      const { document } = await getDocument(client, args[0]);
+      const vault = await documentsVault(client, document.business_id);
+      const file = await downloadDocument(client, args[0], {
+        version: flags.signed ? 'signed' : 'original',
+        revision: flags.revision ? Number(flags.revision) : undefined,
+        vault,
+      });
       const out = flags.out || file.filename;
       writeFileSync(out, file.bytes, { mode: 0o600 });
       return print.success('Decrypted ' + file.bytes.length + ' bytes to ' + out + ' (sha256 verified)');
@@ -1423,7 +1445,7 @@ async function handleDocument(subcommand, args, flags) {
       return print.success('Deleted');
     }
     default:
-      usageExit('coinpay document <vault-setup|list|upload|share|get|link|revoke|download|void|delete>');
+      usageExit('coinpay document <vault-setup|list|upload|share|get|versions|new-version|link|revoke|download|void|delete>');
   }
 }
 

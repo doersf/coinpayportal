@@ -1,7 +1,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { deleteObject, getObject, putObject } from '@/lib/finances/files';
-import { notifyOwnerDeclined, notifyOwnerSigned, sendCompletedNotices, sendDocumentInvite } from './notify';
+import { notifyOwnerDeclined, notifyOwnerNewVersion, notifyOwnerSigned, sendCompletedNotices, sendDocumentInvite } from './notify';
 import {
   DOCUMENT_COLUMNS,
   EVENT_COLUMNS,
@@ -12,6 +12,7 @@ import {
   SIGN_TOKEN_PATTERN,
   SEAL_OVERHEAD,
   signActionSchema,
+  VERSION_COLUMNS,
   signUrl,
   statusFor,
   zodError,
@@ -77,7 +78,7 @@ export async function shareDocument(
 ): Promise<Result<{ recipients: (Record<string, unknown> & { url: string })[]; status: string }>> {
   if (doc.status === 'voided') return bad('This document was voided', 409);
   if (doc.status === 'declined') return bad('A signer declined this document; upload a new copy to start again', 409);
-  if (doc.status === 'completed' && input.recipients.some((r) => r.role === 'signer')) {
+  if (doc.status === 'completed' && input.recipients.some((r) => r.role !== 'viewer')) {
     return bad('Every signer has signed; you can still share the signed copy with viewers', 409);
   }
 
@@ -197,9 +198,99 @@ export async function voidDocument(
 }
 
 export async function deleteDocument(supabase: SupabaseClient, doc: DocumentRow): Promise<void> {
+  const { data: versions } = await supabase.from('document_versions').select('object_key').eq('document_id', doc.id);
   await supabase.from('documents').delete().eq('id', doc.id);
-  await deleteObject(doc.object_key).catch(() => undefined);
+  const keys = new Set([doc.object_key, ...((versions ?? []) as { object_key: string }[]).map((v) => v.object_key)]);
+  for (const key of keys) await deleteObject(key).catch(() => undefined);
   if (doc.signed_object_key) await deleteObject(doc.signed_object_key).catch(() => undefined);
+}
+
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+
+export async function listVersions(supabase: SupabaseClient, documentId: string) {
+  const { data } = await supabase.from('document_versions').select(VERSION_COLUMNS).eq('document_id', documentId).order('version', { ascending: false });
+  return data ?? [];
+}
+
+/** Why a new version cannot be added right now, or null if it can. */
+async function versionBlocker(supabase: SupabaseClient, doc: DocumentRow): Promise<string | null> {
+  if (['completed', 'declined', 'voided'].includes(doc.status)) return `A ${doc.status} document cannot be changed`;
+  const { count } = await supabase
+    .from('document_recipients')
+    .select('id', { count: 'exact', head: true })
+    .eq('document_id', doc.id)
+    .eq('status', 'signed')
+    .is('revoked_at', null);
+  return count ? 'Someone has already signed this version; void it and upload a new document to change it' : null;
+}
+
+/**
+ * Add a version: the next number, sealed by the uploader's browser under the
+ * same document key. It becomes current, so pending signers sign it.
+ */
+export async function addVersion(
+  supabase: SupabaseClient,
+  doc: DocumentRow,
+  sealed: Buffer,
+  meta: { version: number; filename: string; content_type: string; bytes: number; sha256: string; note?: string | null },
+  actor: { recipientId?: string; label: string | null; meta: RequestMeta; byRecipient: boolean }
+): Promise<Result<{ version: number }>> {
+  const blocker = await versionBlocker(supabase, doc);
+  if (blocker) return bad(blocker, 409);
+  if (meta.version !== doc.current_version + 1) return bad(`Someone else changed this document; reload and try again (now at version ${doc.current_version})`, 409);
+  if (sealed.length !== meta.bytes + SEAL_OVERHEAD || sealed[0] !== 0x01) return bad('The file must be sealed in the browser before upload');
+
+  const filename = meta.filename.split(/[\\/]/).pop()!.slice(0, 200) || 'document';
+  const stored = await putObject('signing', doc.business_id, sealed);
+  const { error } = await supabase.from('document_versions').insert({
+    document_id: doc.id,
+    business_id: doc.business_id,
+    version: meta.version,
+    filename,
+    content_type: meta.content_type,
+    bytes: meta.bytes,
+    sha256: meta.sha256,
+    object_key: stored.objectKey,
+    note: meta.note || null,
+    uploaded_by: actor.label,
+    recipient_id: actor.recipientId ?? null,
+  });
+  if (error) {
+    await deleteObject(stored.objectKey).catch(() => undefined);
+    return bad(error.code === '23505' ? 'Someone else uploaded a version at the same moment; reload and try again' : 'Could not save the version', error.code === '23505' ? 409 : 500);
+  }
+  const { data: moved } = await supabase
+    .from('documents')
+    .update({
+      current_version: meta.version,
+      filename,
+      content_type: meta.content_type,
+      bytes: meta.bytes,
+      sha256: meta.sha256,
+      object_key: stored.objectKey,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', doc.id)
+    .eq('current_version', meta.version - 1)
+    .in('status', ['draft', 'shared', 'out_for_signature'])
+    .select('id')
+    .maybeSingle();
+  if (!moved) {
+    await supabase.from('document_versions').delete().eq('document_id', doc.id).eq('version', meta.version);
+    await deleteObject(stored.objectKey).catch(() => undefined);
+    return bad('The document changed while uploading; reload and try again', 409);
+  }
+  await recordEvent(supabase, doc, 'version_added', {
+    actor: actor.byRecipient ? 'recipient' : 'owner',
+    recipientId: actor.recipientId,
+    label: actor.label,
+    meta: actor.meta,
+    detail: { version: meta.version, filename, sha256: meta.sha256, note: meta.note || undefined },
+  });
+  if (actor.byRecipient) await notifyOwnerNewVersion(supabase, doc, actor.label ?? 'An editor', meta.version, meta.note ?? null);
+  return { ok: true, data: { version: meta.version } };
 }
 
 // ---------------------------------------------------------------------------
@@ -358,11 +449,14 @@ export async function loadSigningView(supabase: SupabaseClient, token: string, m
         bytes: doc.bytes,
         sha256: doc.sha256,
         status: doc.status,
+        current_version: doc.current_version,
         created_at: doc.created_at,
         completed_at: doc.completed_at,
         signed_available: Boolean(doc.signed_object_key),
         signed_sha256: doc.signed_sha256,
       },
+      versions: await listVersions(supabase, doc.id),
+      can_edit: recipient.role === 'editor' && !(await versionBlocker(supabase, doc)),
       // Present once complete, so this browser can build the signed copy if nobody has yet.
       certificate: doc.status === 'completed' ? await certificateData(supabase, doc) : null,
       recipient: {
@@ -446,11 +540,24 @@ export async function runSignAction(supabase: SupabaseClient, token: string, bod
   return { ok: true, data: { status: completed ? 'completed' : doc.status } };
 }
 
-/** The sealed bytes of the original or the signed copy. Only a key holder can open them. */
-export async function readSealedFile(doc: DocumentRow, version: 'original' | 'signed'): Promise<Result<Buffer>> {
+/**
+ * The sealed bytes of the current file, an earlier version (`versionNo`), or
+ * the signed copy. Only a key holder can open them.
+ */
+export async function readSealedFile(
+  supabase: SupabaseClient,
+  doc: DocumentRow,
+  version: 'original' | 'signed',
+  versionNo?: number | null
+): Promise<Result<Buffer>> {
   if (version === 'signed') {
     if (!doc.signed_object_key) return bad(doc.status === 'completed' ? 'The signed copy has not been sealed yet' : 'There is no signed copy until everyone signs', 409);
     return { ok: true, data: await getObject(doc.signed_object_key) };
+  }
+  if (versionNo && versionNo !== doc.current_version) {
+    const { data } = await supabase.from('document_versions').select('object_key').eq('document_id', doc.id).eq('version', versionNo).maybeSingle();
+    if (!data) return bad('No such version', 404);
+    return { ok: true, data: await getObject(data.object_key as string) };
   }
   return { ok: true, data: await getObject(doc.object_key) };
 }

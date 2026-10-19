@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { button, card, ErrorBox, input } from '@/app/contractors/ui';
-import { PREVIEW_TYPES } from '@/lib/documents/types';
+import { button, card, ErrorBox, ghost, input } from '@/app/contractors/ui';
+import { contentTypeFor, MAX_DOCUMENT_BYTES, PREVIEW_TYPES } from '@/lib/documents/types';
 import { loadVaults, setupVault, unlock, vaultUnlocked } from '@/lib/documents/client';
 import type { VaultRecord } from '@/lib/documents/e2e';
 
@@ -208,3 +208,92 @@ export function VaultGate({ businessId, children }: { businessId: string; childr
   );
 }
 
+
+export interface DocVersion {
+  version: number;
+  filename: string;
+  content_type: string;
+  bytes: number;
+  sha256: string;
+  note: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+export const roleLabel: Record<string, string> = { signer: 'Needs to sign', viewer: 'Can view', editor: 'Can edit' };
+
+/** Every version of the document, newest first, each downloadable (decrypted here). */
+export function VersionHistory({
+  versions,
+  current,
+  onDownload,
+}: {
+  versions: DocVersion[];
+  current: number;
+  onDownload: (v: DocVersion) => void;
+}) {
+  if (versions.length === 0) return null;
+  return (
+    <section className={card}>
+      <h2 className="text-lg font-semibold text-white mb-3">History</h2>
+      <ul className="divide-y divide-gray-700">
+        {versions.map((v) => (
+          <li key={v.version} className="py-2 flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-white text-sm">
+                Version {v.version}
+                {v.version === current ? <span className="ml-2 text-xs text-green-300">current</span> : null}
+                <span className="text-gray-400"> · {v.filename} · {fileSize(v.bytes)}</span>
+              </p>
+              <p className="text-xs text-gray-500">
+                {new Date(v.created_at).toLocaleString()}
+                {v.uploaded_by ? ` · ${v.uploaded_by}` : ''}
+                {v.note ? ` · ${v.note}` : ''}
+              </p>
+            </div>
+            <button onClick={() => onDownload(v)} className={ghost}>Download</button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Upload the next version; it is sealed in this browser before it leaves. */
+export function NewVersionForm({ onUpload }: { onUpload: (file: File, contentType: string, note: string | null) => Promise<void> }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file) return;
+    const contentType = contentTypeFor(file.name);
+    if (!contentType) return setError('Upload a PDF, PNG, JPEG, Word, Excel, PowerPoint, text or CSV file');
+    if (file.size > MAX_DOCUMENT_BYTES) return setError(`Files must be ${MAX_DOCUMENT_BYTES / (1024 * 1024)} MB or smaller`);
+    setBusy(true);
+    setError('');
+    try {
+      await onUpload(file, contentType, note.trim() || null);
+      setFile(null);
+      setNote('');
+      (e.target as HTMLFormElement).reset();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form onSubmit={submit} className={`${card} space-y-3`}>
+      <h2 className="text-lg font-semibold text-white">Upload a new version</h2>
+      <p className="text-xs text-gray-500">Earlier versions stay in the history. Once anyone signs, the document can no longer change.</p>
+      <ErrorBox message={error} />
+      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-end">
+        <input required type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className={`${input} sm:col-span-2`} />
+        <input placeholder="What changed (optional)" maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} className={`${input} sm:col-span-2`} />
+        <button disabled={busy || !file} className={button}>{busy ? 'Encrypting…' : 'Upload version'}</button>
+      </div>
+    </form>
+  );
+}

@@ -43,7 +43,7 @@ async function send(to: string | null | undefined, subject: string, html: string
 export async function sendDocumentInvite(
   supabase: SupabaseClient,
   doc: { business_id: string; title: string; message: string | null },
-  recipient: { name: string; email: string; role: 'signer' | 'viewer' },
+  recipient: { name: string; email: string; role: 'signer' | 'viewer' | 'editor' },
   token: string,
   documentKey: string | null
 ) {
@@ -57,11 +57,15 @@ export async function sendDocumentInvite(
     : `<p><strong>This document is end-to-end encrypted.</strong> ${escapeHtml(biz.name)} will send you the full link, which contains the key, separately (for example by text or chat). The button below opens the document page, where you can paste that link if you have it.</p>`;
   await send(
     recipient.email,
-    signer ? `${biz.name} sent you "${doc.title}" to sign` : `${biz.name} shared "${doc.title}" with you`,
+    signer
+      ? `${biz.name} sent you "${doc.title}" to sign`
+      : recipient.role === 'editor'
+        ? `${biz.name} invited you to edit "${doc.title}"`
+        : `${biz.name} shared "${doc.title}" with you`,
     layout(
       signer ? `Please sign: ${doc.title}` : doc.title,
       `<p>Hi ${escapeHtml(recipient.name)},</p>
-<p>${escapeHtml(biz.name)} ${signer ? 'asked you to review and sign' : 'shared'} <strong>${escapeHtml(doc.title)}</strong>.</p>${note}${keyNote}
+<p>${escapeHtml(biz.name)} ${signer ? 'asked you to review and sign' : recipient.role === 'editor' ? 'invited you to view and edit' : 'shared'} <strong>${escapeHtml(doc.title)}</strong>.</p>${note}${keyNote}
 <p>No account is needed.</p>`,
       { href: documentKey ? `${signUrl(token)}#k=${documentKey}` : signUrl(token), label: signer ? 'Review and sign' : 'View document' }
     )
@@ -77,6 +81,27 @@ export async function notifyOwnerSigned(supabase: SupabaseClient, doc: { id: str
       `${who} signed`,
       `<p>${escapeHtml(who)} signed <strong>${escapeHtml(doc.title)}</strong>.</p>
 <p>${remaining > 0 ? `Waiting on ${remaining} more signer${remaining === 1 ? '' : 's'}.` : 'That was the last signature; the signed copy is on its way.'}</p>`,
+      { href: `${appUrl()}/documents/${doc.id}`, label: 'Open the document' }
+    )
+  );
+}
+
+export async function notifyOwnerNewVersion(
+  supabase: SupabaseClient,
+  doc: { id: string; business_id: string; title: string },
+  who: string,
+  version: number,
+  note: string | null
+) {
+  const biz = await businessContacts(supabase, doc.business_id);
+  await send(
+    biz.ownerEmail,
+    `${who} uploaded version ${version} of "${doc.title}"`,
+    layout(
+      `New version of ${doc.title}`,
+      `<p>${escapeHtml(who)} uploaded version ${version} of <strong>${escapeHtml(doc.title)}</strong>.</p>${
+        note ? `<blockquote style="margin:16px 0;padding:12px 16px;background:#f3f4f6;border-radius:8px;white-space:pre-wrap">${escapeHtml(note)}</blockquote>` : ''
+      }<p>Earlier versions are kept in the document's history.</p>`,
       { href: `${appUrl()}/documents/${doc.id}`, label: 'Open the document' }
     )
   );

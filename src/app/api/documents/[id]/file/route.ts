@@ -8,13 +8,15 @@ type Ctx = { params: Promise<{ id: string }> };
 
 export const dynamic = 'force-dynamic';
 
-/** GET /api/documents/[id]/file?version=original|signed — sealed bytes for the owner's browser to open. */
+/** GET /api/documents/[id]/file?version=original|signed&n=<version no> — sealed bytes for the owner's browser to open. */
 export async function GET(request: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const auth = await authorizeDocument(request, id, 'business.read');
   if (!auth.ok) return auth.response;
-  const version = new URL(request.url).searchParams.get('version') === 'signed' ? 'signed' : 'original';
-  const file = await readSealedFile(auth.doc, version);
+  const search = new URL(request.url).searchParams;
+  const version = search.get('version') === 'signed' ? 'signed' : 'original';
+  const n = Number(search.get('n'));
+  const file = await readSealedFile(auth.supabase, auth.doc, version, Number.isInteger(n) && n > 0 ? n : null);
   if (!file.ok) return fail(file.error, file.status);
   return sealedResponse(file.data);
 }

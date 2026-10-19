@@ -118,6 +118,17 @@ export async function POST(request: NextRequest) {
     return fail(error?.code === '23505' ? 'A document with that id already exists' : 'Failed to save the document', error?.code === '23505' ? 409 : 500);
   }
 
+  await auth.supabase.from('document_versions').insert({
+    document_id: meta.id,
+    business_id: auth.businessId,
+    version: 1,
+    filename,
+    content_type: meta.content_type,
+    bytes: meta.bytes,
+    sha256: meta.sha256,
+    object_key: stored.objectKey,
+    uploaded_by: await ownerLabel(auth.supabase, auth.merchantId),
+  });
   await recordEvent(auth.supabase, { id: meta.id, business_id: auth.businessId }, 'uploaded', {
     actor: 'owner',
     label: await ownerLabel(auth.supabase, auth.merchantId),

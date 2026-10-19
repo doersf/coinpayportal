@@ -137,15 +137,24 @@ export function keyText(documentKey: Uint8Array): string {
   return toB64url(documentKey);
 }
 
+/** Which blob to open: a version of the file (default the current one) or the signed copy. */
+export function blobRef(
+  doc: { id: string; sha256: string; current_version: number; signed_sha256?: string | null },
+  which: 'current' | 'signed' | { version: number; sha256: string } = 'current'
+): { aad: string; sha256: string | null; query: string } {
+  if (which === 'signed') return { aad: AAD.signed(doc.id), sha256: doc.signed_sha256 ?? null, query: '?version=signed' };
+  if (which === 'current') return { aad: AAD.version(doc.id, doc.current_version), sha256: doc.sha256, query: '' };
+  return { aad: AAD.version(doc.id, which.version), sha256: which.sha256, query: `?n=${which.version}` };
+}
+
 /**
- * Fetch sealed bytes and open them. For the original, the sha256 must match
- * what the uploader recorded, so a swapped file is refused rather than shown.
+ * Fetch sealed bytes and open them. The sha256 must match what the uploader
+ * recorded, so a swapped file is refused rather than shown.
  */
 export async function fetchAndOpen(
   url: string,
   documentKey: Uint8Array,
-  doc: { id: string; sha256: string; signed_sha256?: string | null },
-  version: 'original' | 'signed',
+  ref: { aad: string; sha256: string | null },
   headers: Record<string, string> = {}
 ): Promise<Uint8Array> {
   const res = await fetch(url, { headers, cache: 'no-store' });
@@ -154,10 +163,30 @@ export async function fetchAndOpen(
     throw new Error(body.error || `Download failed (${res.status})`);
   }
   const sealed = new Uint8Array(await res.arrayBuffer());
-  const plain = await open(documentKey, sealed, version === 'original' ? AAD.original(doc.id) : AAD.signed(doc.id));
-  const expected = version === 'original' ? doc.sha256 : doc.signed_sha256;
-  if (expected && (await sha256Hex(plain)) !== expected) throw new Error('This file does not match its recorded fingerprint');
+  const plain = await open(documentKey, sealed, ref.aad);
+  if (ref.sha256 && (await sha256Hex(plain)) !== ref.sha256) throw new Error('This file does not match its recorded fingerprint');
   return plain;
+}
+
+/** Seal a new version under the document key and upload it as `nextVersion`. */
+export async function uploadVersion(
+  url: string,
+  documentId: string,
+  documentKey: Uint8Array,
+  nextVersion: number,
+  file: File,
+  opts: { contentType: string; note: string | null },
+  headers: Record<string, string> = {}
+): Promise<void> {
+  const plain = new Uint8Array(await file.arrayBuffer());
+  const sealed = await seal(documentKey, plain, AAD.version(documentId, nextVersion));
+  const form = new FormData();
+  form.set(
+    'meta',
+    JSON.stringify({ version: nextVersion, filename: file.name, content_type: opts.contentType, bytes: plain.length, sha256: await sha256Hex(plain), note: opts.note })
+  );
+  form.set('file', new Blob([sealed as BlobPart], { type: 'application/octet-stream' }), 'sealed.bin');
+  await jsonOrThrow(await fetch(url, { method: 'POST', headers, body: form }));
 }
 
 export { authHeaders as ownerHeaders };

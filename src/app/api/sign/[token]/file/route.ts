@@ -9,7 +9,7 @@ type Ctx = { params: Promise<{ token: string }> };
 export const dynamic = 'force-dynamic';
 
 /**
- * GET /api/sign/[token]/file?version=original|signed&download=1 — sealed
+ * GET /api/sign/[token]/file?version=original|signed&n=<version no>&download=1 — sealed
  * bytes; the recipient's browser opens them with the key from its link.
  */
 export async function GET(request: NextRequest, { params }: Ctx) {
@@ -19,7 +19,8 @@ export async function GET(request: NextRequest, { params }: Ctx) {
   if (!access.ok) return fail(access.error, access.status);
   const search = new URL(request.url).searchParams;
   const version = search.get('version') === 'signed' ? 'signed' : 'original';
-  const file = await readSealedFile(access.doc, version);
+  const n = Number(search.get('n'));
+  const file = await readSealedFile(supabase, access.doc, version, Number.isInteger(n) && n > 0 ? n : null);
   if (!file.ok) return fail(file.error, file.status);
   if (search.get('download') === '1') {
     await recordEvent(supabase, access.doc, 'downloaded', {

@@ -1,20 +1,22 @@
 'use client';
 
 import { use, useCallback, useEffect, useState } from 'react';
-import { fetchAndOpen, saveBytes, sealSignedCopy } from '@/lib/documents/client';
+import { blobRef, fetchAndOpen, saveBytes, sealSignedCopy, uploadVersion } from '@/lib/documents/client';
 import { keyFromFragment, sha256Hex } from '@/lib/documents/e2e';
 import { signedFilename } from '@/lib/documents/types';
 import type { CertificateInput } from '@/lib/documents/certificate';
-import { Badge, button, card, day, docTone, ErrorBox, fileSize, ghost, input, Preview, SignaturePad, Spinner } from '@/app/documents/ui';
+import { Badge, button, card, day, docTone, ErrorBox, fileSize, ghost, input, NewVersionForm, Preview, roleLabel, SignaturePad, Spinner, VersionHistory, type DocVersion } from '@/app/documents/ui';
 
 interface View {
   business: { name: string };
   document: {
     id: string; business_id: string; title: string; message: string | null; filename: string; content_type: string; bytes: number;
-    sha256: string; status: string; created_at: string; completed_at: string | null; signed_available: boolean; signed_sha256: string | null;
+    sha256: string; status: string; current_version: number; created_at: string; completed_at: string | null; signed_available: boolean; signed_sha256: string | null;
   };
-  recipient: { name: string; email: string; role: 'signer' | 'viewer'; status: string; signed_at: string | null; signature_name: string | null };
+  recipient: { name: string; email: string; role: 'signer' | 'viewer' | 'editor'; status: string; signed_at: string | null; signature_name: string | null };
   signers: { name: string; status: string; signed_at: string | null; you: boolean }[];
+  versions: DocVersion[];
+  can_edit: boolean;
   certificate: (Omit<CertificateInput, 'document' | 'original' | 'businessName' | 'completedAt'> & { business_name: string; completed_at: string }) | null;
 }
 
@@ -61,7 +63,7 @@ export default function SignPage({ params }: { params: Promise<{ token: string }
     if (!view || !key) return;
     (async () => {
       try {
-        const bytes = await fetchAndOpen(`/api/sign/${token}/file`, key, view.document, 'original');
+        const bytes = await fetchAndOpen(`/api/sign/${token}/file`, key, blobRef(view.document));
         setPlain(bytes);
         setHash(await sha256Hex(bytes));
         setNeedKey(false);
@@ -71,7 +73,7 @@ export default function SignPage({ params }: { params: Promise<{ token: string }
         setNeedKey(true);
       }
     })();
-  }, [view?.document.id, key, token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view?.document.id, view?.document.current_version, key, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Everyone has signed and nobody has sealed the signed copy yet: this browser can.
   useEffect(() => {
@@ -118,11 +120,29 @@ export default function SignPage({ params }: { params: Promise<{ token: string }
   const downloadSigned = async () => {
     if (!view || !key) return;
     try {
-      const bytes = await fetchAndOpen(`/api/sign/${token}/file?version=signed&download=1`, key, view.document, 'signed');
+      const bytes = await fetchAndOpen(`/api/sign/${token}/file?version=signed&download=1`, key, blobRef(view.document, 'signed'));
       saveBytes(bytes, signedFilename(view.document.filename), 'application/pdf');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Download failed');
     }
+  };
+
+  const downloadVersion = async (v: DocVersion) => {
+    if (!view || !key) return;
+    try {
+      const ref = blobRef(view.document, { version: v.version, sha256: v.sha256 });
+      saveBytes(await fetchAndOpen(`/api/sign/${token}/file${ref.query}&download=1`, key, ref), v.filename, v.content_type);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed');
+    }
+  };
+
+  const newVersion = async (file: File, contentType: string, note: string | null) => {
+    if (!view || !key) throw new Error('Open the document first');
+    const next = view.document.current_version + 1;
+    await uploadVersion(`/api/sign/${token}/versions`, view.document.id, key, next, file, { contentType, note });
+    setNotice(`Version ${next} uploaded. The sender has been told.`);
+    await load();
   };
 
   if (gone) {
@@ -144,9 +164,12 @@ export default function SignPage({ params }: { params: Promise<{ token: string }
     <div className="min-h-screen bg-gray-900 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto space-y-6">
         <div>
-          <p className="text-sm text-gray-400">{view.business.name} {recipient.role === 'signer' ? 'asked you to sign' : 'shared with you'}</p>
+          <p className="text-sm text-gray-400">
+            {view.business.name} {recipient.role === 'signer' ? 'asked you to sign' : recipient.role === 'editor' ? 'invited you to edit' : 'shared with you'}
+            <span className="ml-2 text-xs text-gray-500">({roleLabel[recipient.role]})</span>
+          </p>
           <h1 className="text-2xl font-bold text-white break-words">{doc.title}</h1>
-          <p className="text-xs text-gray-500 mt-1">{doc.filename} · {fileSize(doc.bytes)} · end-to-end encrypted</p>
+          <p className="text-xs text-gray-500 mt-1">{doc.filename} · {fileSize(doc.bytes)} · version {doc.current_version} · end-to-end encrypted</p>
           {doc.message && <p className="mt-3 text-gray-300 whitespace-pre-wrap">{doc.message}</p>}
         </div>
 
@@ -176,6 +199,10 @@ export default function SignPage({ params }: { params: Promise<{ token: string }
             </div>
           </section>
         )}
+
+        {view.can_edit && plain && <NewVersionForm onUpload={newVersion} />}
+
+        {plain && <VersionHistory versions={view.versions} current={doc.current_version} onDownload={downloadVersion} />}
 
         {view.signers.length > 0 && (
           <section className={card}>

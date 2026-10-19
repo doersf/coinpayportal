@@ -13,9 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   business vault key, which is wrapped under a PBKDF2 passphrase); CoinPay stores only ciphertext.
   `share` adds signers and viewers and prints each full link with its `#k=` key; the invite
   emails omit the key unless `--email-key`. `download` decrypts and verifies the sha256.
+  Invites can be signers, editors (upload new versions) or viewers (`--signers/--editors/--viewers`).
+  Every version is kept: `versions <id>`, `new-version <id> <file>`, `download --revision N`.
 - SDK: `listDocuments`, `getDocument`, `setupDocumentsVault`, `unlockDocumentsVault`,
   `uploadDocument`, `shareDocument`, `newDocumentLink`, `revokeDocumentRecipient`,
-  `voidDocument`, `deleteDocument`, `downloadDocument`.
+  `voidDocument`, `deleteDocument`, `downloadDocument`, `listDocumentVersions`, `uploadDocumentVersion`.
 - MCP: `document_list`, `document_get`, `document_void` (metadata only; no keys).
 
 ## [0.19.0] - 2026-10-17

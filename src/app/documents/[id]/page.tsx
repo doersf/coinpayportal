@@ -4,18 +4,18 @@ import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { authFetch } from '@/lib/auth/client';
-import { documentKeyFor, fetchAndOpen, keyText, linkWithKey, ownerHeaders, saveBytes, sealSignedCopy } from '@/lib/documents/client';
+import { blobRef, documentKeyFor, fetchAndOpen, keyText, linkWithKey, ownerHeaders, saveBytes, sealSignedCopy, uploadVersion } from '@/lib/documents/client';
 import { signedFilename } from '@/lib/documents/types';
 import type { CertificateInput } from '@/lib/documents/certificate';
-import { Badge, button, card, day, docStatusLabel, docTone, ErrorBox, fileSize, ghost, input, Preview, Spinner, VaultGate } from '../ui';
+import { Badge, button, card, day, docStatusLabel, docTone, ErrorBox, fileSize, ghost, input, NewVersionForm, Preview, roleLabel, Spinner, VaultGate, VersionHistory, type DocVersion } from '../ui';
 
 interface Doc {
   id: string; business_id: string; title: string; message: string | null; filename: string; content_type: string; bytes: number;
-  sha256: string; wrapped_key: string; status: string; signed_sha256: string | null; signed_available: boolean;
+  sha256: string; wrapped_key: string; current_version: number; status: string; signed_sha256: string | null; signed_available: boolean;
   completed_at: string | null; voided_at: string | null; void_reason: string | null; created_at: string;
 }
 interface Recipient {
-  id: string; name: string; email: string; role: 'signer' | 'viewer'; status: string; sent_at: string | null; viewed_at: string | null;
+  id: string; name: string; email: string; role: 'signer' | 'viewer' | 'editor'; status: string; sent_at: string | null; viewed_at: string | null;
   signed_at: string | null; signature_name: string | null; signature_ip: string | null; declined_at: string | null;
   decline_reason: string | null; expires_at: string | null; revoked_at: string | null;
 }
@@ -25,10 +25,10 @@ type Certificate = Omit<CertificateInput, 'document' | 'original' | 'businessNam
 const EVENT_TEXT: Record<string, string> = {
   uploaded: 'Uploaded', shared: 'Shared', resent: 'New link sent', revoked: 'Access revoked', viewed: 'Opened', downloaded: 'Downloaded',
   consented: 'Agreed to sign electronically', signed: 'Signed', declined: 'Declined', completed: 'Completed', sealed: 'Signed copy sealed',
-  voided: 'Voided', renamed: 'Renamed',
+  voided: 'Voided', renamed: 'Renamed', version_added: 'New version',
 };
 
-const blankRow = { name: '', email: '', role: 'signer' as 'signer' | 'viewer' };
+const blankRow = { name: '', email: '', role: 'signer' as 'signer' | 'viewer' | 'editor' };
 
 export default function DocumentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -37,6 +37,7 @@ export default function DocumentPage({ params }: { params: Promise<{ id: string 
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [events, setEvents] = useState<DocEvent[]>([]);
   const [certificate, setCertificate] = useState<Certificate | null>(null);
+  const [versions, setVersions] = useState<DocVersion[]>([]);
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -54,6 +55,7 @@ export default function DocumentPage({ params }: { params: Promise<{ id: string 
     setRecipients(result.data.recipients);
     setEvents(result.data.events);
     setCertificate(result.data.certificate);
+    setVersions(result.data.versions ?? []);
   }, [id, router]);
   useEffect(() => { load(); }, [load]);
 
@@ -79,6 +81,7 @@ export default function DocumentPage({ params }: { params: Promise<{ id: string 
             recipients={recipients}
             events={events}
             certificate={certificate}
+            versions={versions}
             reload={load}
             busy={busy}
             setBusy={setBusy}
@@ -94,10 +97,10 @@ export default function DocumentPage({ params }: { params: Promise<{ id: string 
 }
 
 function DocumentBody(props: {
-  doc: Doc; recipients: Recipient[]; events: DocEvent[]; certificate: Certificate | null; reload: () => Promise<void>;
+  doc: Doc; recipients: Recipient[]; events: DocEvent[]; certificate: Certificate | null; versions: DocVersion[]; reload: () => Promise<void>;
   busy: boolean; setBusy: (b: boolean) => void; error: string; setError: (e: string) => void; notice: string; setNotice: (n: string) => void;
 }) {
-  const { doc, recipients, events, certificate, reload, busy, setBusy, error, setError, notice, setNotice } = props;
+  const { doc, recipients, events, certificate, versions, reload, busy, setBusy, error, setError, notice, setNotice } = props;
   const router = useRouter();
   const [key, setKey] = useState<Uint8Array | null>(null);
   const [plain, setPlain] = useState<Uint8Array | null>(null);
@@ -112,7 +115,7 @@ function DocumentBody(props: {
       try {
         const k = await documentKeyFor(doc);
         setKey(k);
-        setPlain(await fetchAndOpen(`/api/documents/${doc.id}/file`, k, doc, 'original', ownerHeaders()));
+        setPlain(await fetchAndOpen(`/api/documents/${doc.id}/file`, k, blobRef(doc), ownerHeaders()));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not open the document');
       }
@@ -192,7 +195,7 @@ function DocumentBody(props: {
   const downloadSigned = async () => {
     if (!key) return;
     try {
-      const bytes = await fetchAndOpen(`/api/documents/${doc.id}/file?version=signed`, key, doc, 'signed', ownerHeaders());
+      const bytes = await fetchAndOpen(`/api/documents/${doc.id}/file?version=signed`, key, blobRef(doc, 'signed'), ownerHeaders());
       saveBytes(bytes, signedFilename(doc.filename), 'application/pdf');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Download failed');
@@ -219,6 +222,23 @@ function DocumentBody(props: {
     }
   };
 
+  const downloadVersion = async (v: DocVersion) => {
+    if (!key) return;
+    try {
+      const ref = blobRef(doc, { version: v.version, sha256: v.sha256 });
+      saveBytes(await fetchAndOpen(`/api/documents/${doc.id}/file${ref.query}`, key, ref, ownerHeaders()), v.filename, v.content_type);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed');
+    }
+  };
+
+  const newVersion = async (file: File, contentType: string, note: string | null) => {
+    if (!key) throw new Error('Still decrypting');
+    await uploadVersion(`/api/documents/${doc.id}/versions`, doc.id, key, doc.current_version + 1, file, { contentType, note }, ownerHeaders());
+    setNotice(`Version ${doc.current_version + 1} uploaded.`);
+    await reload();
+  };
+
   const copy = async (text: string) => {
     await navigator.clipboard.writeText(text);
     setNotice('Link copied. It contains the key, so send it privately.');
@@ -233,7 +253,7 @@ function DocumentBody(props: {
         <div className="min-w-0">
           <h1 className="text-2xl font-bold text-white break-words">{doc.title}</h1>
           <p className="text-sm text-gray-400 mt-1">
-            {doc.filename} · {fileSize(doc.bytes)} · uploaded {day(doc.created_at)}
+            {doc.filename} · {fileSize(doc.bytes)} · version {doc.current_version} · uploaded {day(doc.created_at)}
           </p>
           <p className="text-xs text-gray-500 mt-1 font-mono break-all">sha256 {doc.sha256}</p>
         </div>
@@ -256,6 +276,10 @@ function DocumentBody(props: {
         {plain ? <Preview bytes={plain} contentType={doc.content_type} title={doc.title} /> : <p className="text-gray-400 text-sm">Decrypting…</p>}
       </section>
 
+      {['draft', 'shared', 'out_for_signature'].includes(doc.status) && !recipients.some((r) => r.status === 'signed' && !r.revoked_at) && (
+        <NewVersionForm onUpload={newVersion} />
+      )}
+
       {!closed && (
         <form onSubmit={share} className={`${card} space-y-3`}>
           <h2 className="text-lg font-semibold text-white">{doc.status === 'completed' ? 'Share the signed copy' : 'Send for signature or share'}</h2>
@@ -264,8 +288,9 @@ function DocumentBody(props: {
               <input placeholder="Name" value={r.name} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} className={`${input} sm:col-span-2`} />
               <input required type="email" placeholder="Email" value={r.email} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, email: e.target.value } : x)))} className={`${input} sm:col-span-3`} />
               <select aria-label="Role" value={doc.status === 'completed' ? 'viewer' : r.role} disabled={doc.status === 'completed'} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, role: e.target.value as 'signer' | 'viewer' } : x)))} className={input}>
-                <option value="signer">Needs to sign</option>
-                <option value="viewer">View only</option>
+                <option value="signer">{roleLabel.signer}</option>
+                <option value="editor">{roleLabel.editor}</option>
+                <option value="viewer">{roleLabel.viewer}</option>
               </select>
               <button type="button" onClick={() => setRows(rows.length > 1 ? rows.filter((_, j) => j !== i) : [{ ...blankRow }])} className={ghost}>Remove</button>
             </div>
@@ -299,7 +324,7 @@ function DocumentBody(props: {
                   <div className="min-w-0">
                     <p className="text-white">{r.name} <span className="text-gray-500 text-sm">{r.email}</span></p>
                     <p className="text-xs text-gray-500">
-                      {r.role === 'signer' ? 'Signer' : 'Viewer'}
+                      {roleLabel[r.role]}
                       {r.viewed_at ? ` · opened ${day(r.viewed_at)}` : ''}
                       {r.signed_at ? ` · signed ${day(r.signed_at)} as “${r.signature_name}” from ${r.signature_ip ?? 'unknown address'}` : ''}
                       {r.declined_at ? ` · declined ${day(r.declined_at)}: ${r.decline_reason}` : ''}
@@ -326,6 +351,8 @@ function DocumentBody(props: {
           Links are shown once, when created. CoinPay stores only a hash of each link and never the key, so to give someone their link again, make a new one.
         </p>
       </section>
+
+      <VersionHistory versions={versions} current={doc.current_version} onDownload={downloadVersion} />
 
       <section className={card}>
         <h2 className="text-lg font-semibold text-white mb-3">Audit trail</h2>

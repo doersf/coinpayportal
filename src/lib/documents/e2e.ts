@@ -83,6 +83,8 @@ export async function open(rawKey: Uint8Array, sealed: Uint8Array, aad: string):
 /** Purpose labels used as AAD, so a blob cannot be swapped for another kind. */
 export const AAD = {
   original: (documentId: string) => `coinpay-doc:original:${documentId}`,
+  /** Version 1 is the original upload; later versions add their number. */
+  version: (documentId: string, n: number) => (n === 1 ? `coinpay-doc:original:${documentId}` : `coinpay-doc:original:${documentId}:v${n}`),
   signed: (documentId: string) => `coinpay-doc:signed:${documentId}`,
   documentKey: (businessId: string) => `coinpay-doc:dk:${businessId}`,
   vaultKey: (businessId: string) => `coinpay-doc:vk:${businessId}`,

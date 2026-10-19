@@ -60,6 +60,25 @@ IP and device). It needs these to send emails and keep the signing record.
    sealed under DK and uploaded; the first upload wins. Only signers and the
    owner may seal, each seal is audited, and the owner can **Rebuild** it.
 
+## Roles and history
+
+Invites carry a role:
+
+| Role | Can |
+| --- | --- |
+| Can view (`viewer`) | Open, download, see the history |
+| Can edit (`editor`) | Also upload new versions from their link |
+| Needs to sign (`signer`) | Open and sign (or decline) the current version |
+
+Every upload is kept as a version (`document_versions`), sealed under the same
+document key with the number in the AAD (`coinpay-doc:original:<id>:v<n>`;
+version 1 keeps the original label), so existing links open every version and
+a server that serves one version as another is caught. `documents` mirrors the
+current version, which is what signers see and sign. A new version is refused
+once anyone has signed, so a signature always binds to the bytes its signer
+saw; to change a signed document, void it and upload a new one. An editor's
+upload emails the owner.
+
 Statuses: `draft` → `shared` (viewers only) / `out_for_signature` →
 `completed`, or `declined` / `voided`.
 
@@ -74,18 +93,22 @@ Statuses: `draft` → `shared` (viewers only) / `out_for_signature` →
 | `PATCH /api/documents/<id>` | invoice.write | `rename` or `void` |
 | `DELETE /api/documents/<id>` | invoice.write (completed: business.update) | Remove with files |
 | `GET/POST /api/documents/<id>/file` | business.read / invoice.write | Sealed bytes; upload signed copy (`?replace=1`) |
-| `POST /api/documents/<id>/recipients` | invoice.write | Share |
+| `GET/POST /api/documents/<id>/versions` | business.read / invoice.write | History; upload the next version |
+| `POST /api/sign/<token>/versions` | editor link | Upload the next version |
+| `POST /api/documents/<id>/recipients` | invoice.write | Share (roles: signer, editor, viewer) |
 | `POST/DELETE /api/documents/<id>/recipients/<rid>` | invoice.write | New link / revoke |
 | `GET/POST /api/sign/<token>` | link | View; `sign` or `decline` |
 | `GET/POST /api/sign/<token>/file` | link | Sealed bytes; seal the signed copy (signers) |
 
 ## CLI and MCP
 
-`coinpay document vault-setup|list|upload|share|get|link|revoke|download|void|delete`.
+`coinpay document vault-setup|list|upload|share|get|versions|new-version|link|revoke|download|void|delete`
+(`share --signers/--editors/--viewers`, `download --revision N`).
 The passphrase comes from `COINPAY_DOCUMENTS_PASSPHRASE` or a hidden prompt;
 `share` prints each full link. MCP has `document_list`, `document_get` and
 `document_void`, which see metadata only: an agent never gets the passphrase.
 
 Tables: `document_vaults`, `documents`, `document_recipients`, `document_events`
-(migration `20261019120000_documents_esign.sql`). Files: object kind `signing`
+(migration `20261019120000_documents_esign.sql`) and `document_versions`
+(`20261019130000_documents_versions_editors.sql`). Files: object kind `signing`
 on the files volume, additionally encrypted at rest like finance documents.

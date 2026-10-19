@@ -141,6 +141,8 @@ import {
   voidDocument,
   deleteDocument,
   downloadDocument,
+  listDocumentVersions,
+  uploadDocumentVersion,
 } from './documents.js';
 
 // Wallet exports
@@ -339,6 +341,8 @@ export {
   voidDocument,
   deleteDocument,
   downloadDocument,
+  listDocumentVersions,
+  uploadDocumentVersion,
   
   // Wallet
   WalletClient,

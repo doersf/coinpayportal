@@ -59,6 +59,16 @@ describe('document end-to-end encryption', () => {
     await expect(unwrapDocumentKey(BUSINESS, newKey(), wrapped)).rejects.toThrow();
   });
 
+  it('binds each version to its number, keeping version 1 compatible with the original', async () => {
+    expect(AAD.version(DOC, 1)).toBe(AAD.original(DOC));
+    const key = newKey();
+    const v2 = await seal(key, bytes('second draft'), AAD.version(DOC, 2));
+    expect(new TextDecoder().decode(await open(key, v2, AAD.version(DOC, 2)))).toBe('second draft');
+    // A server that serves version 2 as version 3 (or as the original) is caught.
+    await expect(open(key, v2, AAD.version(DOC, 3))).rejects.toThrow();
+    await expect(open(key, v2, AAD.original(DOC))).rejects.toThrow();
+  });
+
   it('carries the key in the fragment and reads it back', () => {
     const key = newKey();
     expect(keyFromFragment(`#${keyFragment(key)}`)).toEqual(key);

@@ -40,6 +40,7 @@ export const DOCUMENT_TYPES = {
 
 export const AAD = {
   original: (documentId) => `coinpay-doc:original:${documentId}`,
+  version: (documentId, n) => (n === 1 ? `coinpay-doc:original:${documentId}` : `coinpay-doc:original:${documentId}:v${n}`),
   signed: (documentId) => `coinpay-doc:signed:${documentId}`,
   documentKey: (businessId) => `coinpay-doc:dk:${businessId}`,
   vaultKey: (businessId) => `coinpay-doc:vk:${businessId}`,
@@ -233,14 +234,52 @@ export async function deleteDocument(client, documentId) {
   return client.request('/documents/' + id(documentId), { method: 'DELETE' });
 }
 
-/** Download and decrypt the original or the signed copy, checking its sha256. */
-export async function downloadDocument(client, documentId, { version = 'original', vault }) {
+/** Every version of the document, newest first (metadata; the files stay sealed). */
+export async function listDocumentVersions(client, documentId) {
+  const data = await client.request(`/documents/${id(documentId)}/versions`);
+  return data.versions ?? [];
+}
+
+/**
+ * Encrypt and upload the next version. Refused once anyone has signed;
+ * earlier versions stay in the history.
+ */
+export async function uploadDocumentVersion(client, documentId, { vault, bytes, filename, note }) {
   const doc = (await getDocument(client, documentId)).document;
+  const ext = String(filename).toLowerCase().split('.').pop();
+  const contentType = DOCUMENT_TYPES[ext];
+  if (!contentType) throw new Error('Unsupported file type: use ' + Object.keys(DOCUMENT_TYPES).join(', '));
   const dk = await documentKey(client, doc, vault);
-  const { bytes } = await client.requestBinary(`/documents/${id(documentId)}/file?version=${version === 'signed' ? 'signed' : 'original'}`);
-  const plain = await open(dk, bytes, version === 'signed' ? AAD.signed(documentId) : AAD.original(documentId));
-  const expected = version === 'signed' ? doc.signed_sha256 : doc.sha256;
-  if (expected && (await sha256Hex(plain)) !== expected) throw new Error('The file does not match its recorded sha256');
-  const filename = version === 'signed' ? doc.filename.replace(/\.[A-Za-z0-9]{1,5}$/, '') + '-signed.pdf' : doc.filename;
-  return { bytes: plain, filename, document: doc };
+  const plain = new Uint8Array(bytes);
+  const next = doc.current_version + 1;
+  const form = new FormData();
+  form.set(
+    'meta',
+    JSON.stringify({ version: next, filename: String(filename).split(/[\\/]/).pop(), content_type: contentType, bytes: plain.length, sha256: await sha256Hex(plain), note: note || null })
+  );
+  form.set('file', new Blob([await seal(dk, plain, AAD.version(documentId, next))], { type: 'application/octet-stream' }), 'sealed.bin');
+  return client.requestForm(`/documents/${id(documentId)}/versions`, form);
+}
+
+/**
+ * Download and decrypt the current file, an earlier `revision`, or the signed
+ * copy (`version: 'signed'`), checking its sha256.
+ */
+export async function downloadDocument(client, documentId, { version = 'original', revision, vault }) {
+  const data = await getDocument(client, documentId);
+  const doc = data.document;
+  const dk = await documentKey(client, doc, vault);
+  if (version === 'signed') {
+    const { bytes } = await client.requestBinary(`/documents/${id(documentId)}/file?version=signed`);
+    const plain = await open(dk, bytes, AAD.signed(documentId));
+    if (doc.signed_sha256 && (await sha256Hex(plain)) !== doc.signed_sha256) throw new Error('The file does not match its recorded sha256');
+    return { bytes: plain, filename: doc.filename.replace(/\.[A-Za-z0-9]{1,5}$/, '') + '-signed.pdf', document: doc };
+  }
+  const n = revision || doc.current_version;
+  const entry = (data.versions ?? []).find((v) => v.version === n) ?? (n === doc.current_version ? doc : null);
+  if (!entry) throw new Error('No such version');
+  const { bytes } = await client.requestBinary(`/documents/${id(documentId)}/file?n=${n}`);
+  const plain = await open(dk, bytes, AAD.version(documentId, n));
+  if ((await sha256Hex(plain)) !== entry.sha256) throw new Error('The file does not match its recorded sha256');
+  return { bytes: plain, filename: entry.filename, document: doc, revision: n };
 }

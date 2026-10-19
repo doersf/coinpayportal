@@ -41,7 +41,7 @@ describe('documents (end-to-end encrypted)', () => {
     await expect(unlockDocumentsVault(client, { businessId: BUSINESS, passphrase: 'nope' })).rejects.toThrow('Wrong passphrase');
 
     const secret = new TextEncoder().encode('Confidential: the price is 42');
-    await uploadDocument(client, { businessId: BUSINESS, vault, bytes: secret, filename: '/tmp/deal.txt' });
+    await uploadDocument(client, { businessId: BUSINESS, vault, bytes: secret, filename: 'contracts/deal.txt' });
     const form = client.calls.at(-1).form;
     const meta = JSON.parse(form.get('meta'));
     expect(meta).toMatchObject({ business_id: BUSINESS, filename: 'deal.txt', content_type: 'text/plain', bytes: secret.length, vault_version: 1 });

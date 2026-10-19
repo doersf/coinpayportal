@@ -12,7 +12,7 @@ import {
   requestMeta,
   zodError,
 } from '@/lib/documents/service';
-import { certificateData, deleteDocument, ownerLabel, voidDocument } from '@/lib/documents/workflow';
+import { certificateData, deleteDocument, listVersions, ownerLabel, voidDocument } from '@/lib/documents/workflow';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -31,6 +31,7 @@ export async function GET(request: NextRequest, { params }: Ctx) {
     document: { ...(document.data as unknown as Record<string, unknown>), signed_available: Boolean(auth.doc.signed_object_key) },
     recipients: recipients.data ?? [],
     events: events.data ?? [],
+    versions: await listVersions(auth.supabase, id),
     certificate: auth.doc.status === 'completed' ? await certificateData(auth.supabase, auth.doc) : null,
   });
 }
