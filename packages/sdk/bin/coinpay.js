@@ -66,6 +66,21 @@ import {
   recordPayRunPayments,
   get1099Summary,
 } from '../src/contractors.js';
+import {
+  listDocuments,
+  getDocument,
+  setupDocumentsVault,
+  unlockDocumentsVault,
+  uploadDocument,
+  shareDocument,
+  newDocumentLink,
+  revokeDocumentRecipient,
+  voidDocument,
+  deleteDocument,
+  downloadDocument,
+  listDocumentVersions,
+  uploadDocumentVersion,
+} from '../src/documents.js';
 import { readFileSync, writeFileSync, existsSync, unlinkSync, chmodSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 import { createInterface } from 'readline';
@@ -533,6 +548,22 @@ ${colors.cyan}Commands:${colors.reset}
     bonus | expense       --contract <id> --amount 250 --description "..."
     1099                  Totals and who needs a 1099-NEC (--year 2026)
     offboard <id>         End contracts and revoke the portal link
+
+  ${colors.bright}document${colors.reset}  (end-to-end encrypted: CoinPay never sees the contents)
+    vault-setup           Create the documents passphrase (--business-id, admins)
+    list                  Documents (--business-id) with signing progress
+    upload <file>         Encrypt and upload: --business-id [--title] [--message]
+    share <id>            --signers "Ada <ada@x.com>, bob@y.com" [--editors "..."] [--viewers "..."]
+                          [--message] [--no-email] [--email-key puts the key in the email]
+                          Prints each full link (with #k= key): send it privately
+    get <id>              Status, people and audit trail
+    link <id> <recipient> New link for one person (old one stops working)
+    revoke <id> <recipient>  Remove someone who has not signed
+    versions <id>         The history: every uploaded version
+    new-version <id> <file>  Encrypt and upload the next version [--note]
+    download <id>         Decrypt to a file [--signed | --revision N] [--out path]
+    void <id>             [--reason]    delete <id>
+                          Passphrase: COINPAY_DOCUMENTS_PASSPHRASE or a hidden prompt
 
   ${colors.bright}payrun${colors.reset}
     list                  Pay runs
@@ -1275,6 +1306,147 @@ const usdText = (n) => '$' + Number(n).toFixed(2);
 function usageExit(usage) {
   print.error('Usage: ' + usage);
   process.exit(1);
+}
+
+/** "Ada <ada@x.com>, bob@y.com" -> [{ name, email }] */
+function parsePeople(text, role) {
+  return String(text || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      const m = /^(.*?)\s*<([^>]+)>$/.exec(s);
+      const email = (m ? m[2] : s).trim();
+      return { name: (m && m[1].trim()) || email, email, role };
+    });
+}
+
+async function documentsVault(client, businessId) {
+  const passphrase = process.env.COINPAY_DOCUMENTS_PASSPHRASE || (await promptPassword('Documents passphrase: '));
+  return unlockDocumentsVault(client, { businessId, passphrase });
+}
+
+async function handleDocument(subcommand, args, flags) {
+  const client = createClient();
+  requireFlagValues(flags, ['business-id', 'title', 'message', 'signers', 'viewers', 'editors', 'reason', 'out', 'note', 'revision']);
+  switch (subcommand) {
+    case 'vault-setup': {
+      if (!flags['business-id']) usageExit('coinpay document vault-setup --business-id <id>');
+      print.warn('If this passphrase is lost, nobody (including CoinPay) can recover the documents.');
+      const passphrase = process.env.COINPAY_DOCUMENTS_PASSPHRASE || (await promptPassword('New documents passphrase: '));
+      if (!process.env.COINPAY_DOCUMENTS_PASSPHRASE && (await promptPassword('Repeat it: ')) !== passphrase) usageExit('The passphrases do not match');
+      const vault = await setupDocumentsVault(client, { businessId: flags['business-id'], passphrase });
+      return flags.json ? print.json({ version: vault.version }) : print.success('Documents vault created (version ' + vault.version + ')');
+    }
+    case 'list': {
+      const rows = await listDocuments(client, { businessId: flags['business-id'] });
+      if (flags.json) return print.json(rows);
+      if (!rows.length) return print.info('No documents');
+      for (const d of rows) {
+        const progress = d.signers ? '  ' + d.signed + '/' + d.signers + ' signed' : '';
+        print.info(d.id + '  ' + d.title + '  ' + d.status + progress);
+      }
+      return;
+    }
+    case 'upload': {
+      if (args.length !== 1 || !flags['business-id']) usageExit('coinpay document upload <file> --business-id <id> [--title "..."] [--message "..."]');
+      const vault = await documentsVault(client, flags['business-id']);
+      const doc = await uploadDocument(client, {
+        businessId: flags['business-id'],
+        vault,
+        bytes: readFileSync(args[0]),
+        filename: args[0],
+        title: flags.title,
+        message: flags.message,
+      });
+      if (flags.json) return print.json(doc);
+      print.success('Uploaded (encrypted): ' + doc.id);
+      return print.info('Send it with: coinpay document share ' + doc.id + ' --signers "Name <email>"');
+    }
+    case 'share': {
+      const recipients = [...parsePeople(flags.signers, 'signer'), ...parsePeople(flags.editors, 'editor'), ...parsePeople(flags.viewers, 'viewer')];
+      if (args.length !== 1 || !recipients.length) usageExit('coinpay document share <id> --signers "Ada <ada@x.com>" [--editors "..."] [--viewers "..."] [--message] [--no-email] [--email-key]');
+      const { document } = await getDocument(client, args[0]);
+      const vault = await documentsVault(client, document.business_id);
+      const result = await shareDocument(client, args[0], {
+        recipients,
+        message: flags.message,
+        sendEmail: !flags['no-email'],
+        emailKey: !!flags['email-key'],
+        vault,
+      });
+      if (flags.json) return print.json(result);
+      print.success('Shared; document is now ' + result.status);
+      if (!flags['email-key']) print.warn('The emails do NOT contain the key. Send each person their full link below on another channel:');
+      for (const r of result.recipients) print.info(r.role.padEnd(6) + ' ' + r.email + '  ' + r.link);
+      return;
+    }
+    case 'get': {
+      if (args.length !== 1) usageExit('coinpay document get <id>');
+      const data = await getDocument(client, args[0]);
+      if (flags.json) return print.json(data);
+      const d = data.document;
+      print.info(d.title + '  ' + d.status + '  ' + d.filename + ' (' + d.bytes + ' bytes)');
+      print.info('sha256 ' + d.sha256 + (d.signed_sha256 ? '\nsigned sha256 ' + d.signed_sha256 : ''));
+      for (const r of data.recipients) {
+        if (r.revoked_at) continue;
+        print.info('  ' + r.id + '  ' + r.role + '  ' + r.name + ' <' + r.email + '>  ' + r.status + (r.signed_at ? ' ' + r.signed_at : ''));
+      }
+      for (const e of data.events) print.info('  ' + e.created_at + '  ' + e.event + (e.actor_label ? '  ' + e.actor_label : '') + (e.ip ? '  ' + e.ip : ''));
+      return;
+    }
+    case 'link': {
+      if (args.length !== 2) usageExit('coinpay document link <id> <recipient-id> [--no-email] [--email-key]');
+      const { document } = await getDocument(client, args[0]);
+      const vault = await documentsVault(client, document.business_id);
+      const result = await newDocumentLink(client, args[0], args[1], { sendEmail: !flags['no-email'], emailKey: !!flags['email-key'], vault });
+      return flags.json ? print.json(result) : print.info(result.link);
+    }
+    case 'revoke': {
+      if (args.length !== 2) usageExit('coinpay document revoke <id> <recipient-id>');
+      const result = await revokeDocumentRecipient(client, args[0], args[1]);
+      return flags.json ? print.json(result) : print.success('Revoked; document is now ' + result.status);
+    }
+    case 'versions': {
+      if (args.length !== 1) usageExit('coinpay document versions <id>');
+      const rows = await listDocumentVersions(client, args[0]);
+      if (flags.json) return print.json(rows);
+      for (const v of rows) print.info('v' + v.version + '  ' + v.created_at + '  ' + v.filename + '  ' + v.bytes + ' bytes' + (v.uploaded_by ? '  ' + v.uploaded_by : '') + (v.note ? '  ' + v.note : ''));
+      return;
+    }
+    case 'new-version': {
+      if (args.length !== 2) usageExit('coinpay document new-version <id> <file> [--note "what changed"]');
+      const { document } = await getDocument(client, args[0]);
+      const vault = await documentsVault(client, document.business_id);
+      const result = await uploadDocumentVersion(client, args[0], { vault, bytes: readFileSync(args[1]), filename: args[1], note: flags.note });
+      return flags.json ? print.json(result) : print.success('Uploaded version ' + result.version + ' (encrypted)');
+    }
+    case 'download': {
+      if (args.length !== 1) usageExit('coinpay document download <id> [--signed | --revision N] [--out path]');
+      const { document } = await getDocument(client, args[0]);
+      const vault = await documentsVault(client, document.business_id);
+      const file = await downloadDocument(client, args[0], {
+        version: flags.signed ? 'signed' : 'original',
+        revision: flags.revision ? Number(flags.revision) : undefined,
+        vault,
+      });
+      const out = flags.out || file.filename;
+      writeFileSync(out, file.bytes, { mode: 0o600 });
+      return print.success('Decrypted ' + file.bytes.length + ' bytes to ' + out + ' (sha256 verified)');
+    }
+    case 'void': {
+      if (args.length !== 1) usageExit('coinpay document void <id> [--reason "..."]');
+      await voidDocument(client, args[0], { reason: flags.reason });
+      return print.success('Voided');
+    }
+    case 'delete': {
+      if (args.length !== 1) usageExit('coinpay document delete <id>');
+      await deleteDocument(client, args[0]);
+      return print.success('Deleted');
+    }
+    default:
+      usageExit('coinpay document <vault-setup|list|upload|share|get|versions|new-version|link|revoke|download|void|delete>');
+  }
 }
 
 async function handleContractor(subcommand, args, flags) {
@@ -5255,6 +5427,11 @@ async function handleLightning(subcommand, args, flags) {
 
       case 'project':
         await handleProject(subcommand, args, flags);
+        break;
+
+      case 'document':
+      case 'documents':
+        await handleDocument(subcommand, args, flags);
         break;
 
       case 'contractor':

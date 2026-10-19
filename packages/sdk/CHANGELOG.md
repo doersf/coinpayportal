@@ -5,6 +5,21 @@ All notable changes to `@profullstack/coinpay` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-10-19
+
+### Added
+- Documents, end-to-end encrypted: `coinpay document vault-setup|list|upload|share|get|link|revoke|download|void|delete`.
+  Files are encrypted on your machine (AES-256-GCM, one key per document, wrapped under the
+  business vault key, which is wrapped under a PBKDF2 passphrase); CoinPay stores only ciphertext.
+  `share` adds signers and viewers and prints each full link with its `#k=` key; the invite
+  emails omit the key unless `--email-key`. `download` decrypts and verifies the sha256.
+  Invites can be signers, editors (upload new versions) or viewers (`--signers/--editors/--viewers`).
+  Every version is kept: `versions <id>`, `new-version <id> <file>`, `download --revision N`.
+- SDK: `listDocuments`, `getDocument`, `setupDocumentsVault`, `unlockDocumentsVault`,
+  `uploadDocument`, `shareDocument`, `newDocumentLink`, `revokeDocumentRecipient`,
+  `voidDocument`, `deleteDocument`, `downloadDocument`, `listDocumentVersions`, `uploadDocumentVersion`.
+- MCP: `document_list`, `document_get`, `document_void` (metadata only; no keys).
+
 ## [0.19.0] - 2026-10-17
 
 ### Added
