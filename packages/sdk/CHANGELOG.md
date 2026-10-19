@@ -5,6 +5,18 @@ All notable changes to `@profullstack/coinpay` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-10-19
+
+### Added
+- `coinpay document publish <dir> --business-id <id>`: encrypt and publish a whole directory, keeping
+  its structure (under a folder named like the directory, or `--folder dest`, `--folder /` for the top
+  level). Publishing again syncs: new files upload, changed files become a new version, unchanged files
+  are skipped, signed documents are left alone, nothing remote is deleted. `--dry-run` shows the plan;
+  hidden files and `node_modules` are skipped unless `--include-hidden`.
+- `coinpay document move <id> <folder>`; `upload --folder a/b`; `list` shows folders.
+- Any file type can be uploaded (unknown types are opaque downloads; the server only holds ciphertext).
+- SDK: `publishDirectory`, `planPublish`, `moveDocument`; `uploadDocument({ folder })`.
+
 ## [0.21.0] - 2026-10-19
 
 ### Added

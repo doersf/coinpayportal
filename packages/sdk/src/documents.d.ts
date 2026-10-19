@@ -5,6 +5,7 @@ export interface CoinPayDocument {
   business_id: string;
   title: string;
   message: string | null;
+  folder: string | null;
   filename: string;
   content_type: string;
   bytes: number;
@@ -62,12 +63,15 @@ export interface UnlockedVault {
   version: number;
 }
 
-export function listDocuments(client: CoinPayClient, opts?: { businessId?: string; status?: string }): Promise<CoinPayDocument[]>;
+export function listDocuments(client: CoinPayClient, opts?: { businessId?: string; status?: string; folder?: string }): Promise<CoinPayDocument[]>;
+export function moveDocument(client: CoinPayClient, documentId: string, folder: string | null): Promise<{ folder: string | null }>;
+export function normalizeFolder(input: string | null | undefined): string | null;
+export function contentTypeFor(filename: string): string;
 export function getDocument(client: CoinPayClient, documentId: string): Promise<{ document: CoinPayDocument & { signed_available: boolean }; recipients: DocumentRecipient[]; events: unknown[]; versions: DocumentVersion[]; certificate: unknown }>;
 export function listDocumentVaults(client: CoinPayClient, opts?: { businessId?: string }): Promise<DocumentVault[]>;
 export function setupDocumentsVault(client: CoinPayClient, opts: { businessId: string; passphrase: string }): Promise<UnlockedVault>;
 export function unlockDocumentsVault(client: CoinPayClient, opts: { businessId: string; passphrase: string }): Promise<UnlockedVault>;
-export function uploadDocument(client: CoinPayClient, opts: { businessId: string; vault: UnlockedVault; bytes: Uint8Array; filename: string; title?: string; message?: string }): Promise<CoinPayDocument>;
+export function uploadDocument(client: CoinPayClient, opts: { businessId: string; vault: UnlockedVault; bytes: Uint8Array; filename: string; title?: string; message?: string; folder?: string | null }): Promise<CoinPayDocument>;
 export function shareDocument(
   client: CoinPayClient,
   documentId: string,

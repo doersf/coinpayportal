@@ -129,7 +129,10 @@ export {
   downloadDocument,
   listDocumentVersions,
   uploadDocumentVersion,
+  moveDocument,
 } from './documents.js';
+export { publishDirectory, planPublish } from './documents-publish.js';
+export type { PublishEntry, PublishResult } from './documents-publish.js';
 export type { CoinPayDocument, DocumentRecipient, DocumentVault, DocumentVersion, UnlockedVault } from './documents.js';
 
 // Webhook exports

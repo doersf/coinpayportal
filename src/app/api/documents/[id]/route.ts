@@ -6,6 +6,7 @@ import {
   EVENT_COLUMNS,
   fail,
   json,
+  normalizeFolder,
   readJson,
   recordEvent,
   RECIPIENT_COLUMNS,
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest, { params }: Ctx) {
   });
 }
 
-/** PATCH /api/documents/[id] { action: 'rename', title } | { action: 'void', reason? } */
+/** PATCH /api/documents/[id] { action: 'rename', title } | { action: 'void', reason? } | { action: 'move', folder } */
 export async function PATCH(request: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const body = await readJson(request);
@@ -51,6 +52,18 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     const result = await voidDocument(auth.supabase, auth.doc, parsed.data.reason, actor);
     if (!result.ok) return fail(result.error, result.status);
     return json({ success: true });
+  }
+  if (parsed.data.action === 'move') {
+    let folder: string | null;
+    try {
+      folder = normalizeFolder(parsed.data.folder);
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : 'Invalid folder', 400);
+    }
+    // Filing a signed document elsewhere does not change what was signed, so any status may move.
+    await auth.supabase.from('documents').update({ folder, updated_at: new Date().toISOString() }).eq('id', id);
+    await recordEvent(auth.supabase, auth.doc, 'moved', { actor: 'owner', ...actor, detail: { to: folder } });
+    return json({ success: true, folder });
   }
   if (auth.doc.status === 'completed') return fail('A completed document keeps the title it was signed under', 409);
   await auth.supabase.from('documents').update({ title: parsed.data.title, updated_at: new Date().toISOString() }).eq('id', id);

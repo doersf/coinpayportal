@@ -7,6 +7,7 @@ import {
   fail,
   json,
   MAX_DOCUMENT_BYTES,
+  normalizeFolder,
   recordEvent,
   requestMeta,
   SEAL_OVERHEAD,
@@ -17,7 +18,7 @@ import { ownerLabel } from '@/lib/documents/workflow';
 
 export const dynamic = 'force-dynamic';
 
-/** GET /api/documents?business_id=&status= — newest first, with recipient progress. */
+/** GET /api/documents?business_id=&status=&folder= — newest first, with recipient progress. `folder=` (empty) is the top level. */
 export async function GET(request: NextRequest) {
   const params = new URL(request.url).searchParams;
   const auth = await authorizeCatalog(request, params.get('business_id'), 'business.read');
@@ -27,9 +28,11 @@ export async function GET(request: NextRequest) {
     .select(`${DOCUMENT_COLUMNS}, document_recipients (role, status, revoked_at)`)
     .eq('business_id', auth.businessId)
     .order('created_at', { ascending: false })
-    .limit(500);
+    .limit(5000);
   const status = params.get('status');
   if (status) query = query.eq('status', status);
+  const folder = params.get('folder');
+  if (folder !== null) query = folder === '' ? query.is('folder', null) : query.eq('folder', folder);
   const { data, error } = await query;
   if (error) return fail('Failed to load documents', 500);
 
@@ -94,6 +97,12 @@ export async function POST(request: NextRequest) {
   }
 
   const filename = cleanFilename(meta.filename);
+  let folder: string | null;
+  try {
+    folder = normalizeFolder(meta.folder);
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : 'Invalid folder', 400);
+  }
   const stored = await putObject('signing', auth.businessId, sealed);
   const { data, error } = await auth.supabase
     .from('documents')
@@ -102,6 +111,7 @@ export async function POST(request: NextRequest) {
       business_id: auth.businessId,
       title: meta.title,
       message: meta.message ?? null,
+      folder,
       filename,
       content_type: meta.content_type,
       bytes: meta.bytes,
@@ -133,7 +143,7 @@ export async function POST(request: NextRequest) {
     actor: 'owner',
     label: await ownerLabel(auth.supabase, auth.merchantId),
     meta: requestMeta(request),
-    detail: { filename, bytes: meta.bytes, sha256: meta.sha256 },
+    detail: { filename, folder, bytes: meta.bytes, sha256: meta.sha256 },
   });
   return json({ success: true, document: data }, 201);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contentTypeFor, signedFilename, cleanFilename, SEAL_OVERHEAD } from './types';
+import { contentTypeFor, signedFilename, cleanFilename, isSkippedPath, normalizeFolder, SEAL_OVERHEAD } from './types';
 import { hashToken, newSignToken, SIGN_TOKEN_PATTERN, shareSchema, signActionSchema, statusFor, uploadMetaSchema, versionMetaSchema } from './service';
 
 const signer = (status: string, revoked = false) => ({ role: 'signer' as const, status: status as 'pending', revoked_at: revoked ? '2026-10-19T00:00:00Z' : null });
@@ -26,11 +26,31 @@ describe('documents service', () => {
   it('types files by extension and names the signed copy', () => {
     expect(contentTypeFor('Contract.PDF')).toBe('application/pdf');
     expect(contentTypeFor('terms.docx')).toMatch(/wordprocessingml/);
-    expect(contentTypeFor('payload.exe')).toBeNull();
-    expect(contentTypeFor('page.html')).toBeNull();
+    // Anything else is an opaque, download-only file: the server only ever has ciphertext.
+    expect(contentTypeFor('payload.exe')).toBe('application/octet-stream');
+    expect(contentTypeFor('page.html')).toBe('application/octet-stream');
+    expect(contentTypeFor('Makefile')).toBe('application/octet-stream');
     expect(signedFilename('agreement.docx')).toBe('agreement-signed.pdf');
     expect(cleanFilename('../../etc/"pass"wd')).toBe('passwd');
     expect(SEAL_OVERHEAD).toBe(29);
+  });
+
+  it('normalizes folder paths and refuses traversal', () => {
+    expect(normalizeFolder('contracts/2026/acme')).toBe('contracts/2026/acme');
+    expect(normalizeFolder('/contracts//2026/ ./acme/')).toBe('contracts/2026/acme');
+    expect(normalizeFolder('contracts\\\\2026')).toBe('contracts/2026');
+    expect(normalizeFolder('')).toBeNull();
+    expect(normalizeFolder('/')).toBeNull();
+    expect(normalizeFolder(null)).toBeNull();
+    expect(() => normalizeFolder('a/../../etc')).toThrow(/\.\./);
+    expect(() => normalizeFolder(Array(21).fill('d').join('/'))).toThrow(/levels/);
+  });
+
+  it('skips hidden files and dependency trees in folder uploads', () => {
+    expect(isSkippedPath('site/.git/config')).toBe(true);
+    expect(isSkippedPath('.DS_Store')).toBe(true);
+    expect(isSkippedPath('app/node_modules/x/index.js')).toBe(true);
+    expect(isSkippedPath('contracts/2026/nda.pdf')).toBe(false);
   });
 
   it('refuses a signature without consent or a document fingerprint', () => {

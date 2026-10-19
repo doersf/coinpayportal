@@ -80,7 +80,9 @@ import {
   downloadDocument,
   listDocumentVersions,
   uploadDocumentVersion,
+  moveDocument,
 } from '../src/documents.js';
+import { publishDirectory } from '../src/documents-publish.js';
 import { readFileSync, writeFileSync, existsSync, unlinkSync, chmodSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 import { createInterface } from 'readline';
@@ -552,7 +554,11 @@ ${colors.cyan}Commands:${colors.reset}
   ${colors.bright}document${colors.reset}  (end-to-end encrypted: CoinPay never sees the contents)
     vault-setup           Create the documents passphrase (--business-id, admins)
     list                  Documents (--business-id) with signing progress
-    upload <file>         Encrypt and upload: --business-id [--title] [--message]
+    upload <file>         Encrypt and upload: --business-id [--folder a/b] [--title] [--message]
+    publish <dir>         Sync a whole directory, keeping its structure: --business-id
+                          [--folder dest | --folder / for top level] [--dry-run] [--include-hidden]
+                          new files upload, changed ones become versions, signed ones are left alone
+    move <id> <folder>    File a document elsewhere (/ = top level)
     share <id>            --signers "Ada <ada@x.com>, bob@y.com" [--editors "..."] [--viewers "..."]
                           [--message] [--no-email] [--email-key puts the key in the email]
                           Prints each full link (with #k= key): send it privately
@@ -1328,7 +1334,7 @@ async function documentsVault(client, businessId) {
 
 async function handleDocument(subcommand, args, flags) {
   const client = createClient();
-  requireFlagValues(flags, ['business-id', 'title', 'message', 'signers', 'viewers', 'editors', 'reason', 'out', 'note', 'revision']);
+  requireFlagValues(flags, ['business-id', 'title', 'message', 'signers', 'viewers', 'editors', 'reason', 'out', 'note', 'revision', 'folder']);
   switch (subcommand) {
     case 'vault-setup': {
       if (!flags['business-id']) usageExit('coinpay document vault-setup --business-id <id>');
@@ -1344,12 +1350,56 @@ async function handleDocument(subcommand, args, flags) {
       if (!rows.length) return print.info('No documents');
       for (const d of rows) {
         const progress = d.signers ? '  ' + d.signed + '/' + d.signers + ' signed' : '';
-        print.info(d.id + '  ' + d.title + '  ' + d.status + progress);
+        print.info(d.id + '  ' + (d.folder ? d.folder + '/' : '') + d.title + '  ' + d.status + progress);
       }
       return;
     }
+    case 'publish': {
+      if (args.length !== 1 || !flags['business-id']) usageExit('coinpay document publish <dir> --business-id <id> [--folder path | --folder /] [--dry-run] [--include-hidden]');
+      if (!existsSync(args[0])) usageExit('No such directory: ' + args[0]);
+      const businessId = flags['business-id'];
+      const dryRun = !!flags['dry-run'];
+      const vault = dryRun ? undefined : await documentsVault(client, businessId);
+      const labels = { upload: 'new', version: 'new version', unchanged: 'unchanged', locked: 'signed, left alone', too_large: 'too large (9 MB max)', empty: 'empty, skipped' };
+      const result = await publishDirectory(client, {
+        businessId,
+        vault,
+        dir: args[0],
+        folder: flags.folder,
+        includeHidden: !!flags['include-hidden'],
+        dryRun,
+        onFile: (p) => {
+          if (flags.json) return;
+          const where = (p.folder ? p.folder + '/' : '') + p.filename;
+          if (p.result === 'ok') print.success((p.action === 'upload' ? 'uploaded ' : 'v' + p.version + ' ') + where);
+          else print.error('failed ' + where + ': ' + p.error);
+        },
+      });
+      if (flags.json) return print.json(result);
+      const count = (a) => result.plan.filter((p) => p.action === a).length;
+      if (dryRun) {
+        for (const p of result.plan) print.info(labels[p.action].padEnd(20) + ' ' + (p.folder ? p.folder + '/' : '') + p.filename);
+        print.info('Dry run: nothing was uploaded.');
+      }
+      const failed = result.plan.filter((p) => p.result === 'failed').length;
+      print.info(
+        'Into ' + (result.folder ? result.folder + '/' : 'the top level') + ': ' +
+          count('upload') + ' new, ' + count('version') + ' new versions, ' + count('unchanged') + ' unchanged' +
+          (count('locked') ? ', ' + count('locked') + ' signed (left alone)' : '') +
+          (count('too_large') ? ', ' + count('too_large') + ' too large' : '') +
+          (result.skippedHidden ? ', ' + result.skippedHidden + ' hidden skipped' : '') +
+          (failed ? ', ' + failed + ' FAILED' : '')
+      );
+      if (failed) process.exitCode = 1;
+      return;
+    }
+    case 'move': {
+      if (args.length !== 2) usageExit('coinpay document move <id> <folder>   (use / for the top level)');
+      const result = await moveDocument(client, args[0], args[1]);
+      return flags.json ? print.json(result) : print.success('Moved to ' + (result.folder || 'the top level'));
+    }
     case 'upload': {
-      if (args.length !== 1 || !flags['business-id']) usageExit('coinpay document upload <file> --business-id <id> [--title "..."] [--message "..."]');
+      if (args.length !== 1 || !flags['business-id']) usageExit('coinpay document upload <file> --business-id <id> [--folder path] [--title "..."] [--message "..."]');
       const vault = await documentsVault(client, flags['business-id']);
       const doc = await uploadDocument(client, {
         businessId: flags['business-id'],
@@ -1358,6 +1408,7 @@ async function handleDocument(subcommand, args, flags) {
         filename: args[0],
         title: flags.title,
         message: flags.message,
+        folder: flags.folder,
       });
       if (flags.json) return print.json(doc);
       print.success('Uploaded (encrypted): ' + doc.id);
@@ -1445,7 +1496,7 @@ async function handleDocument(subcommand, args, flags) {
       return print.success('Deleted');
     }
     default:
-      usageExit('coinpay document <vault-setup|list|upload|share|get|versions|new-version|link|revoke|download|void|delete>');
+      usageExit('coinpay document <vault-setup|list|upload|publish|move|share|get|versions|new-version|link|revoke|download|void|delete>');
   }
 }
 

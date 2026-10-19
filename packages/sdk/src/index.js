@@ -143,7 +143,9 @@ import {
   downloadDocument,
   listDocumentVersions,
   uploadDocumentVersion,
+  moveDocument,
 } from './documents.js';
+import { publishDirectory, planPublish } from './documents-publish.js';
 
 // Wallet exports
 import {
@@ -343,6 +345,9 @@ export {
   downloadDocument,
   listDocumentVersions,
   uploadDocumentVersion,
+  moveDocument,
+  publishDirectory,
+  planPublish,
   
   // Wallet
   WalletClient,

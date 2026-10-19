@@ -10,7 +10,7 @@ import type { CertificateInput } from '@/lib/documents/certificate';
 import { Badge, button, card, day, docStatusLabel, docTone, ErrorBox, fileSize, ghost, input, NewVersionForm, Preview, roleLabel, Spinner, VaultGate, VersionHistory, type DocVersion } from '../ui';
 
 interface Doc {
-  id: string; business_id: string; title: string; message: string | null; filename: string; content_type: string; bytes: number;
+  id: string; business_id: string; title: string; message: string | null; folder: string | null; filename: string; content_type: string; bytes: number;
   sha256: string; wrapped_key: string; current_version: number; status: string; signed_sha256: string | null; signed_available: boolean;
   completed_at: string | null; voided_at: string | null; void_reason: string | null; created_at: string;
 }
@@ -25,7 +25,7 @@ type Certificate = Omit<CertificateInput, 'document' | 'original' | 'businessNam
 const EVENT_TEXT: Record<string, string> = {
   uploaded: 'Uploaded', shared: 'Shared', resent: 'New link sent', revoked: 'Access revoked', viewed: 'Opened', downloaded: 'Downloaded',
   consented: 'Agreed to sign electronically', signed: 'Signed', declined: 'Declined', completed: 'Completed', sealed: 'Signed copy sealed',
-  voided: 'Voided', renamed: 'Renamed', version_added: 'New version',
+  voided: 'Voided', renamed: 'Renamed', version_added: 'New version', moved: 'Moved',
 };
 
 const blankRow = { name: '', email: '', role: 'signer' as 'signer' | 'viewer' | 'editor' };
@@ -222,6 +222,12 @@ function DocumentBody(props: {
     }
   };
 
+  const move = async () => {
+    const to = window.prompt('Move to folder (blank for the top level):', doc.folder ?? '');
+    if (to === null) return;
+    if (await call(`/api/documents/${doc.id}`, 'PATCH', { action: 'move', folder: to.trim() || null })) await reload();
+  };
+
   const downloadVersion = async (v: DocVersion) => {
     if (!key) return;
     try {
@@ -251,6 +257,12 @@ function DocumentBody(props: {
     <>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
+          {doc.folder && (
+            <p className="text-sm text-gray-400 mb-1">
+              <span aria-hidden>📁 </span>
+              {doc.folder.split('/').join(' / ')}
+            </p>
+          )}
           <h1 className="text-2xl font-bold text-white break-words">{doc.title}</h1>
           <p className="text-sm text-gray-400 mt-1">
             {doc.filename} · {fileSize(doc.bytes)} · version {doc.current_version} · uploaded {day(doc.created_at)}
@@ -263,6 +275,7 @@ function DocumentBody(props: {
           {doc.signed_available && <button onClick={downloadSigned} className={button}>Download signed copy</button>}
           {doc.signed_available && <button disabled={sealing || !plain} onClick={rebuild} className={ghost} title="Build the signed copy again in this browser and replace the stored one">Rebuild</button>}
           {!['completed', 'voided'].includes(doc.status) && <button disabled={busy} onClick={voidIt} className={ghost}>Void</button>}
+          <button disabled={busy} onClick={move} className={ghost}>Move</button>
           <button disabled={busy} onClick={remove} className={ghost}>Delete</button>
         </div>
       </div>

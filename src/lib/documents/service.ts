@@ -20,7 +20,7 @@ import { ALLOWED_CONTENT_TYPES, MAX_DOCUMENT_BYTES } from './types';
  */
 
 export const DOCUMENT_COLUMNS =
-  'id, business_id, title, message, filename, content_type, bytes, sha256, wrapped_key, vault_version, current_version, status, ' +
+  'id, business_id, title, message, folder, filename, content_type, bytes, sha256, wrapped_key, vault_version, current_version, status, ' +
   'signed_sha256, signed_bytes, ' +
   'completed_at, voided_at, void_reason, created_at, updated_at';
 export const RECIPIENT_COLUMNS =
@@ -137,6 +137,7 @@ export const uploadMetaSchema = z
     business_id: z.string().uuid(),
     title: z.string().trim().min(1).max(200),
     message: z.string().trim().max(2000).nullable().optional(),
+    folder: z.string().max(1000).nullable().optional(),
     filename: z.string().min(1).max(255),
     content_type: z.string().refine((t) => ALLOWED_CONTENT_TYPES.has(t), 'Unsupported file type'),
     bytes: z.number().int().positive().max(MAX_DOCUMENT_BYTES),
@@ -173,6 +174,7 @@ export const sealedCopyMetaSchema = z.object({ sha256, bytes: z.number().int().p
 export const documentPatchSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('rename'), title: z.string().trim().min(1).max(200) }).strict(),
   z.object({ action: z.literal('void'), reason: z.string().trim().max(1000).optional() }).strict(),
+  z.object({ action: z.literal('move'), folder: z.string().max(1000).nullable() }).strict(),
 ]);
 
 /** A drawn signature: a PNG data URL, small enough to keep in the row. */
