@@ -58,7 +58,14 @@ export default function DocumentsPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const filesInput = useRef<HTMLInputElement>(null);
-  const folderInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement | null>(null);
+  // webkitdirectory is not in React's typings, and this input only mounts once
+  // the vault is unlocked (inside VaultGate), so set it as the node attaches.
+  const folderPicker = useCallback((node: HTMLInputElement | null) => {
+    folderInput.current = node;
+    node?.setAttribute('webkitdirectory', '');
+    node?.setAttribute('directory', '');
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -79,12 +86,6 @@ export default function DocumentsPage() {
     setDocuments(result?.data.success ? result.data.documents : []);
   }, [businessId, router]);
   useEffect(() => { load(); }, [load]);
-
-  // The folder picker attribute is not in React's typings.
-  useEffect(() => {
-    folderInput.current?.setAttribute('webkitdirectory', '');
-    folderInput.current?.setAttribute('directory', '');
-  });
 
   const start = async (picked: { items: UploadItem[]; skipped: number }) => {
     setError('');
@@ -225,7 +226,7 @@ export default function DocumentsPage() {
                 <button type="button" disabled={uploading} onClick={() => filesInput.current?.click()} className={button}>Choose files</button>
                 <button type="button" disabled={uploading} onClick={() => folderInput.current?.click()} className={ghost}>Choose folder</button>
                 <input ref={filesInput} type="file" multiple hidden onChange={(e) => { onPick(e.target.files); e.target.value = ''; }} />
-                <input ref={folderInput} type="file" multiple hidden onChange={(e) => { onPick(e.target.files); e.target.value = ''; }} />
+                <input ref={folderPicker} type="file" multiple hidden onChange={(e) => { onPick(e.target.files); e.target.value = ''; }} />
               </div>
               <div className="border-2 border-dashed border-gray-600 rounded-xl py-6 text-center text-sm text-gray-400">
                 {uploading ? `Encrypting and uploading… ${done}/${jobs.length}` : 'Or drop files and folders here. Folders keep their structure.'}
