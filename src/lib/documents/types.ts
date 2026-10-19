@@ -24,13 +24,42 @@ export const DOCUMENT_TYPES: Record<string, string> = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
-export const ALLOWED_CONTENT_TYPES = new Set(Object.values(DOCUMENT_TYPES));
+/** Anything else uploads as an opaque file: it is ciphertext to us, and the page offers it as a download. */
+export const GENERIC_CONTENT_TYPE = 'application/octet-stream';
+export const ALLOWED_CONTENT_TYPES = new Set([...Object.values(DOCUMENT_TYPES), GENERIC_CONTENT_TYPE]);
 
 /** Types the page previews itself from the decrypted bytes. */
 export const PREVIEW_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'text/plain', 'text/csv']);
 
-export function contentTypeFor(filename: string): string | null {
-  return DOCUMENT_TYPES[filename.toLowerCase().split('.').pop() ?? ''] ?? null;
+export function contentTypeFor(filename: string): string {
+  const ext = filename.includes('.') ? filename.toLowerCase().split('.').pop() ?? '' : '';
+  return DOCUMENT_TYPES[ext] ?? GENERIC_CONTENT_TYPE;
+}
+
+export const MAX_FOLDER_DEPTH = 20;
+
+/**
+ * A folder path as stored: segments joined by '/', trimmed, no empty, '.' or
+ * '..' segments, no leading or trailing slash. Null means the top level.
+ * Throws on '..' rather than silently collapsing it.
+ */
+export function normalizeFolder(input: string | null | undefined): string | null {
+  if (input == null) return null;
+  const segments = String(input)
+    .split(/[\\/]+/)
+    // eslint-disable-next-line no-control-regex
+    .map((s) => s.replace(/[\u0000-\u001f\u007f]/g, '').trim())
+    .filter((s) => s && s !== '.');
+  if (segments.some((s) => s === '..')) throw new Error('Folder paths cannot contain ".."');
+  if (segments.length > MAX_FOLDER_DEPTH) throw new Error(`Folders can be at most ${MAX_FOLDER_DEPTH} levels deep`);
+  const joined = segments.map((s) => s.slice(0, 100)).join('/');
+  if (joined.length > 1000) throw new Error('Folder path is too long');
+  return joined || null;
+}
+
+/** Files a folder upload skips unless asked: hidden files and directories, and dependency trees. */
+export function isSkippedPath(relativePath: string): boolean {
+  return relativePath.split(/[\\/]+/).some((s) => (s.startsWith('.') && s !== '.' && s !== '..') || s === 'node_modules' || s === 'Thumbs.db' || s === 'desktop.ini');
 }
 
 /** A filename safe to echo back in headers and emails. */

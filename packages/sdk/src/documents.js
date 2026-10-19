@@ -38,6 +38,37 @@ export const DOCUMENT_TYPES = {
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
 
+export const GENERIC_CONTENT_TYPE = 'application/octet-stream';
+export const MAX_DOCUMENT_BYTES = 9 * 1024 * 1024;
+
+/** Known types preview in the browser; anything else is an opaque download (it is ciphertext to the server). */
+export function contentTypeFor(filename) {
+  const name = String(filename);
+  const ext = name.includes('.') ? name.toLowerCase().split('.').pop() : '';
+  return DOCUMENT_TYPES[ext] ?? GENERIC_CONTENT_TYPE;
+}
+
+/** Same rules as the web app (src/lib/documents/types.ts): '/'-joined, no '.', '..' refused, null = top level. */
+export function normalizeFolder(input) {
+  if (input == null) return null;
+  const segments = String(input)
+    .split(/[\\/]+/)
+    // eslint-disable-next-line no-control-regex
+    .map((s) => s.replace(/[\u0000-\u001f\u007f]/g, '').trim())
+    .filter((s) => s && s !== '.');
+  if (segments.some((s) => s === '..')) throw new Error('Folder paths cannot contain ".."');
+  if (segments.length > 20) throw new Error('Folders can be at most 20 levels deep');
+  const joined = segments.map((s) => s.slice(0, 100)).join('/');
+  if (joined.length > 1000) throw new Error('Folder path is too long');
+  return joined || null;
+}
+
+export function isSkippedPath(relativePath) {
+  return String(relativePath)
+    .split(/[\\/]+/)
+    .some((s) => (s.startsWith('.') && s !== '.' && s !== '..') || s === 'node_modules' || s === 'Thumbs.db' || s === 'desktop.ini');
+}
+
 export const AAD = {
   original: (documentId) => `coinpay-doc:original:${documentId}`,
   version: (documentId, n) => (n === 1 ? `coinpay-doc:original:${documentId}` : `coinpay-doc:original:${documentId}:v${n}`),
@@ -122,8 +153,8 @@ export function linkWithKey(url, documentKey) {
 // API
 // ---------------------------------------------------------------------------
 
-export async function listDocuments(client, { businessId, status } = {}) {
-  const data = await client.request('/documents' + q({ business_id: businessId, status }));
+export async function listDocuments(client, { businessId, status, folder } = {}) {
+  const data = await client.request('/documents' + q({ business_id: businessId, status, folder }));
   return data.documents ?? [];
 }
 
@@ -168,10 +199,8 @@ async function documentKey(client, doc, vault) {
 }
 
 /** Encrypt and upload. `bytes` is the file content; `filename` decides its type. */
-export async function uploadDocument(client, { businessId, vault, bytes, filename, title, message }) {
-  const ext = String(filename).toLowerCase().split('.').pop();
-  const contentType = DOCUMENT_TYPES[ext];
-  if (!contentType) throw new Error('Unsupported file type: use ' + Object.keys(DOCUMENT_TYPES).join(', '));
+export async function uploadDocument(client, { businessId, vault, bytes, filename, title, message, folder }) {
+  const contentType = contentTypeFor(filename);
   const plain = new Uint8Array(bytes);
   const docId = globalThis.crypto.randomUUID();
   const dk = newKey();
@@ -180,6 +209,7 @@ export async function uploadDocument(client, { businessId, vault, bytes, filenam
     business_id: businessId,
     title: title || String(filename).replace(/\.[A-Za-z0-9]{1,5}$/, ''),
     message: message || null,
+    folder: normalizeFolder(folder),
     filename: String(filename).split(/[\\/]/).pop(),
     content_type: contentType,
     bytes: plain.length,
@@ -230,6 +260,11 @@ export async function voidDocument(client, documentId, { reason } = {}) {
   return client.request('/documents/' + id(documentId), json('PATCH', { action: 'void', ...(reason ? { reason } : {}) }));
 }
 
+/** File a document under another folder (null = top level). */
+export async function moveDocument(client, documentId, folder) {
+  return client.request('/documents/' + id(documentId), json('PATCH', { action: 'move', folder: normalizeFolder(folder) }));
+}
+
 export async function deleteDocument(client, documentId) {
   return client.request('/documents/' + id(documentId), { method: 'DELETE' });
 }
@@ -246,9 +281,7 @@ export async function listDocumentVersions(client, documentId) {
  */
 export async function uploadDocumentVersion(client, documentId, { vault, bytes, filename, note }) {
   const doc = (await getDocument(client, documentId)).document;
-  const ext = String(filename).toLowerCase().split('.').pop();
-  const contentType = DOCUMENT_TYPES[ext];
-  if (!contentType) throw new Error('Unsupported file type: use ' + Object.keys(DOCUMENT_TYPES).join(', '));
+  const contentType = contentTypeFor(filename);
   const dk = await documentKey(client, doc, vault);
   const plain = new Uint8Array(bytes);
   const next = doc.current_version + 1;

@@ -295,7 +295,6 @@ export function NewVersionForm({ onUpload }: { onUpload: (file: File, contentTyp
     e.preventDefault();
     if (!file) return;
     const contentType = contentTypeFor(file.name);
-    if (!contentType) return setError('Upload a PDF, PNG, JPEG, Word, Excel, PowerPoint, text or CSV file');
     if (file.size > MAX_DOCUMENT_BYTES) return setError(`Files must be ${MAX_DOCUMENT_BYTES / (1024 * 1024)} MB or smaller`);
     setBusy(true);
     setError('');

@@ -38,7 +38,7 @@ IP and device). It needs these to send emails and keep the signing record.
 2. **Upload.** The browser picks the document id (it is bound into the
    ciphertext), encrypts the file under a fresh DK, wraps DK under VK and posts
    `multipart: meta + file` to `POST /api/documents`. Up to 9 MB (the Next proxy
-   buffers bodies up to 10 MB). PDF, PNG, JPEG, DOCX, XLSX, PPTX, TXT, MD, CSV.
+   buffers bodies up to 10 MB). Any file type; PDF, PNG, JPEG, TXT, MD and CSV preview in the page.
 3. **Share.** `POST /api/documents/<id>/recipients` adds signers and viewers.
    The server stores only `sha256(token)`; it returns each link once and the
    browser appends `#k=<DK>` before showing it. **By default the invite email
@@ -59,6 +59,24 @@ IP and device). It needs these to send emails and keep the signing record.
    Non-PDF originals become a page (images) or an embedded attachment. It is
    sealed under DK and uploaded; the first upload wins. Only signers and the
    owner may seal, each seal is audited, and the owner can **Rebuild** it.
+
+## Folders and directory uploads
+
+Documents can live in folders (`documents.folder`, e.g. `contracts/2026/acme`;
+null is the top level). The web page uploads many files at once, a whole
+folder (folder picker or drag and drop, recursively), each file encrypted
+under its own key, three at a time, and shows them as a folding tree with
+search. Folder names, like filenames, are visible to the server. Any file
+type is accepted; types the page cannot preview are offered as downloads.
+Hidden files (`.git`, `.DS_Store`) and `node_modules` are left out unless
+asked. `PATCH /api/documents/<id> {action:"move", folder}` refiles one.
+
+`coinpay document publish <dir> --business-id <id>` does the same from a
+terminal and is a sync: new files are uploaded, changed files (by sha256)
+become a new version of the document at the same folder and filename,
+unchanged files are skipped, documents with signatures (or completed,
+declined, voided) are left alone, and nothing remote is ever deleted.
+`--dry-run` prints the plan; `--folder dest` (or `/`) picks the destination.
 
 ## Roles and history
 
@@ -102,7 +120,7 @@ Statuses: `draft` → `shared` (viewers only) / `out_for_signature` →
 
 ## CLI and MCP
 
-`coinpay document vault-setup|list|upload|share|get|versions|new-version|link|revoke|download|void|delete`
+`coinpay document vault-setup|list|upload|publish|move|share|get|versions|new-version|link|revoke|download|void|delete`
 (`share --signers/--editors/--viewers`, `download --revision N`).
 The passphrase comes from `COINPAY_DOCUMENTS_PASSPHRASE` or a hidden prompt;
 `share` prints each full link. MCP has `document_list`, `document_get` and
@@ -110,5 +128,6 @@ The passphrase comes from `COINPAY_DOCUMENTS_PASSPHRASE` or a hidden prompt;
 
 Tables: `document_vaults`, `documents`, `document_recipients`, `document_events`
 (migration `20261019120000_documents_esign.sql`) and `document_versions`
-(`20261019130000_documents_versions_editors.sql`). Files: object kind `signing`
+(`20261019130000_documents_versions_editors.sql`), and `documents.folder`
+(`20261019150000_documents_folders.sql`). Files: object kind `signing`
 on the files volume, additionally encrypted at rest like finance documents.

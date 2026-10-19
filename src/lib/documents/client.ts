@@ -2,6 +2,7 @@
 
 import { getAuthToken } from '@/lib/auth/client';
 import { buildSignedPdf, type CertificateInput } from './certificate';
+import { contentTypeFor, MAX_DOCUMENT_BYTES } from './types';
 import {
   AAD,
   createVault,
@@ -93,7 +94,7 @@ export async function changePassphrase(businessId: string, passphrase: string): 
 export async function uploadDocument(
   businessId: string,
   file: File,
-  opts: { title: string; message: string | null; contentType: string }
+  opts: { title: string; message: string | null; contentType: string; folder?: string | null }
 ): Promise<{ id: string }> {
   const vault = unlocked.get(businessId);
   if (!vault) throw new Error('Unlock the vault first');
@@ -106,6 +107,7 @@ export async function uploadDocument(
     business_id: businessId,
     title: opts.title,
     message: opts.message,
+    folder: opts.folder ?? null,
     filename: file.name,
     content_type: opts.contentType,
     bytes: plain.length,
@@ -119,6 +121,54 @@ export async function uploadDocument(
   const res = await fetch('/api/documents', { method: 'POST', headers: authHeaders(), body: form });
   const body = await jsonOrThrow(res);
   return { id: body.document.id };
+}
+
+export interface UploadItem {
+  file: File;
+  /** Where it goes, relative to the business's documents (null = top level). */
+  folder: string | null;
+}
+
+export type UploadStatus = { state: 'queued' | 'uploading' | 'done' | 'skipped' | 'failed'; note?: string; id?: string };
+
+/**
+ * Upload many files, each encrypted under its own key, a few at a time.
+ * Reports every file's state as it changes; one failure does not stop the rest.
+ */
+export async function uploadMany(
+  businessId: string,
+  items: UploadItem[],
+  onStatus: (index: number, status: UploadStatus) => void,
+  concurrency = 3
+): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      const { file, folder } = items[i];
+      if (file.size === 0) {
+        onStatus(i, { state: 'skipped', note: 'empty file' });
+        continue;
+      }
+      if (file.size > MAX_DOCUMENT_BYTES) {
+        onStatus(i, { state: 'skipped', note: `over ${MAX_DOCUMENT_BYTES / (1024 * 1024)} MB` });
+        continue;
+      }
+      onStatus(i, { state: 'uploading' });
+      try {
+        const { id } = await uploadDocument(businessId, file, {
+          title: file.name.replace(/\.[A-Za-z0-9]{1,5}$/, '') || file.name,
+          message: null,
+          contentType: contentTypeFor(file.name),
+          folder,
+        });
+        onStatus(i, { state: 'done', id });
+      } catch (err) {
+        onStatus(i, { state: 'failed', note: err instanceof Error ? err.message : 'Upload failed' });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
 }
 
 /** The document key, from the unlocked vault. */
