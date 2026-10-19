@@ -114,6 +114,21 @@ export {
   get1099Summary,
 } from './contractors.js';
 export type { Contractor, ContractorContract, ContractorMilestone, ContractorWorkItem, PayRun, PayRunItem, PayOutcome } from './contractors.js';
+export {
+  listDocuments,
+  getDocument,
+  listDocumentVaults,
+  setupDocumentsVault,
+  unlockDocumentsVault,
+  uploadDocument,
+  shareDocument,
+  newDocumentLink,
+  revokeDocumentRecipient,
+  voidDocument,
+  deleteDocument,
+  downloadDocument,
+} from './documents.js';
+export type { CoinPayDocument, DocumentRecipient, DocumentVault, UnlockedVault } from './documents.js';
 
 // Webhook exports
 export {

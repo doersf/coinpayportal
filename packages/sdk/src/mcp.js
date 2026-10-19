@@ -18,6 +18,7 @@ import * as sf from './statements-fetch.js';
 import { listInvoices, getInvoice, createInvoice } from './invoices.js';
 import * as projects from './projects.js';
 import * as contractors from './contractors.js';
+import * as documents from './documents.js';
 
 export const PROTOCOL_VERSION = '2025-06-18';
 
@@ -385,6 +386,31 @@ export const TOOLS = [
     description: 'Totals paid per contractor in a calendar year and who needs a 1099-NEC (US, $600+, not a corporation). Shows only the last four of tax ids.',
     inputSchema: { type: 'object', properties: { businessId: { type: 'string' }, year: { type: 'integer' } }, additionalProperties: false },
     handler: async (args, { client }) => text(await contractors.get1099Summary(client, args)),
+  },
+  // Documents are end-to-end encrypted. These tools see only metadata and the
+  // audit trail; opening, uploading or sharing a file needs the passphrase,
+  // which stays with a person (dashboard or `coinpay document`), never an agent.
+  {
+    name: 'document_list',
+    description: 'List documents with status (draft, shared, out_for_signature, completed, declined, voided) and signing progress. Contents are end-to-end encrypted and not available here.',
+    inputSchema: { type: 'object', properties: { businessId: { type: 'string' }, status: { type: 'string' } }, additionalProperties: false },
+    handler: async (args, { client }) => text({ documents: await documents.listDocuments(client, args) }),
+  },
+  {
+    name: 'document_get',
+    description: 'One document: who it was sent to, who signed (name, time, IP), and the full audit trail. No file contents or keys.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+    handler: async (args, { client }) => {
+      const { document, recipients, events } = await documents.getDocument(client, args.id);
+      const { wrapped_key: _k, ...meta } = document;
+      return text({ document: meta, recipients, events });
+    },
+  },
+  {
+    name: 'document_void',
+    description: 'Void a document that has not been completed: links stop working and nobody can sign it. Cannot be undone.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, reason: { type: 'string' } }, required: ['id'], additionalProperties: false },
+    handler: async (args, { client }) => text(await documents.voidDocument(client, args.id, { reason: args.reason })),
   },
 ];
 

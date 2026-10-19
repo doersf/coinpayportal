@@ -97,6 +97,7 @@ describe('judgeCloudClient', () => {
       '/proposals/respond/tok_abc',
       '/contractor/yZfnIAHabcdefghijklmnopqrstuvwxyz0123456789',
       '/contractor/yZfnIAHabcdefghijklmnopqrstuvwxyz0123456789/invoices/6f1c2d3e-0000-4000-8000-000000000001',
+      '/sign/yZfnIAHabcdefghijklmnopqrstuvwxyz0123456789',
     ]) {
       expect(judgeCloudClient(req({ 'x-forwarded-for': CLOUD_IP }), path)).toMatchObject({ charge: false, reason: 'payer page' });
     }
@@ -107,6 +108,8 @@ describe('judgeCloudClient', () => {
     // The business's contractor pages are not the contractor portal.
     expect(judgeCloudClient(req({ 'x-forwarded-for': CLOUD_IP }), '/contractors').charge).toBe(true);
     expect(judgeCloudClient(req({ 'x-forwarded-for': CLOUD_IP }), '/contractor/tok/settings').charge).toBe(true);
+    // Neither is the business's documents area.
+    expect(judgeCloudClient(req({ 'x-forwarded-for': CLOUD_IP }), '/documents').charge).toBe(true);
   });
 
   it('never charges a search crawler, even from a cloud address', () => {

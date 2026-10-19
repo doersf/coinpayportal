@@ -163,7 +163,7 @@ const MACHINE_PATHS = /^\/(?:install\.sh$|\.well-known\/)/;
  * lost payment, not a blocked crawler. The same goes for a contractor opening
  * their portal to get paid.
  */
-const PAYER_PATHS = /^\/(?:contractor\/[^/]+(?:\/invoices\/[^/]+)?\/?$|invoices\/[^/]+\/pay\/?$|now\/[^/]+\/?$|portal\/[^/]+\/?$|proposals\/respond\/[^/]+\/?$)/;
+const PAYER_PATHS = /^\/(?:contractor\/[^/]+(?:\/invoices\/[^/]+)?\/?$|invoices\/[^/]+\/pay\/?$|now\/[^/]+\/?$|portal\/[^/]+\/?$|proposals\/respond\/[^/]+\/?$|sign\/[^/]+\/?$)/;
 
 /** The forwarded client address, or null when there is none to judge. */
 export function clientAddress(request: Request): string | null {

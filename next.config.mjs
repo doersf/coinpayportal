@@ -74,10 +74,13 @@ const nextConfig = {
               // paypal.com / sandbox.paypal.com frames.
               "script-src 'self' 'unsafe-inline' https://datafa.st https://crawlproof.com https://invitejs.trustpilot.com https://cdn.plaid.com https://www.paypal.com https://www.sandbox.paypal.com https://*.paypalobjects.com",
               "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: https: https://crawlproof.com",
+              // blob: in img-src and frame-src: end-to-end encrypted documents
+              // (/documents, /sign) are decrypted in the page and previewed from
+              // blob: URLs it creates itself; the server never has the plaintext.
+              "img-src 'self' data: blob: https: https://crawlproof.com",
               "font-src 'self' data:",
               "connect-src 'self' https: wss: https://crawlproof.com",
-              "frame-src 'self' https://cdn.plaid.com https://www.paypal.com https://www.sandbox.paypal.com https://*.paypal.com",
+              "frame-src 'self' blob: https://cdn.plaid.com https://www.paypal.com https://www.sandbox.paypal.com https://*.paypal.com",
               "object-src 'none'",
               "frame-ancestors 'none'",
               "base-uri 'self'",

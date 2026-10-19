@@ -128,6 +128,21 @@ import {
   get1099Summary,
 } from './contractors.js';
 
+import {
+  listDocuments,
+  getDocument,
+  listDocumentVaults,
+  setupDocumentsVault,
+  unlockDocumentsVault,
+  uploadDocument,
+  shareDocument,
+  newDocumentLink,
+  revokeDocumentRecipient,
+  voidDocument,
+  deleteDocument,
+  downloadDocument,
+} from './documents.js';
+
 // Wallet exports
 import {
   WalletClient,
@@ -312,6 +327,18 @@ export {
   payPayRun,
   recordPayRunPayments,
   get1099Summary,
+  listDocuments,
+  getDocument,
+  listDocumentVaults,
+  setupDocumentsVault,
+  unlockDocumentsVault,
+  uploadDocument,
+  shareDocument,
+  newDocumentLink,
+  revokeDocumentRecipient,
+  voidDocument,
+  deleteDocument,
+  downloadDocument,
   
   // Wallet
   WalletClient,
