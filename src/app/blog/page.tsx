@@ -107,8 +107,6 @@ export default async function BlogIndexPage() {
         </ul>
       )}
 
-      {/* Bottom unit: after the list. */}
-      <AdUnit className="mt-10" />
     </div>
   );
 }

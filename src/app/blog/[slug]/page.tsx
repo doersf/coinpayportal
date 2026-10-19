@@ -142,10 +142,6 @@ export default async function BlogPostPage({ params }: RouteParams) {
         </div>
       </article>
 
-      {/* Bottom unit: after the article, below our own CTA so it never
-          outranks it. */}
-      <AdUnit className="mt-10" />
-
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: serializeJsonLd(ldJson) }}

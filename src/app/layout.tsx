@@ -3,14 +3,15 @@ import { ReferralProvider } from '@profullstack/referrals/react';
 import Script from 'next/script';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import PitFooter from '@/components/PitFooter';
 import { HomeGuidePromotion } from '@/components/field-guide/HomeGuidePromotion';
 import { guideAvailable } from '@/lib/field-guide/asset';
 import { Providers } from '@/components/Providers';
 import './globals.css';
 import { serializeJsonLd } from '@/lib/seo/json-ld';
 
-// Re-render static pages hourly so the shared footer (@profullstack/footer,
-// rendered from its @latest template) picks up releases without a redeploy.
+// Re-render static pages hourly so the pit.world global footer (fetched
+// server-side in PitFooter) picks up changes without a redeploy.
 // force-dynamic routes keep their own setting.
 export const revalidate = 3600;
 
@@ -144,6 +145,7 @@ export default async function RootLayout({
           src="https://crawlproof.com/stats.js"
           strategy="afterInteractive"
         />
+        <PitFooter />
       </body>
     </html>
   );
