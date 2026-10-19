@@ -125,6 +125,12 @@ export default function BooksContent() {
   const [digestOptedOut, setDigestOptedOut] = useState(false);
   const [digestBusy, setDigestBusy] = useState(false);
 
+  // business report (opt-in) + Connect CrawlProof
+  const [bizReport, setBizReport] = useState<{ active: boolean; recipients: string[]; nextRunAt: string | null; lastSentAt: string | null } | null>(null);
+  const [bizBusy, setBizBusy] = useState(false);
+  const [crawlproof, setCrawlproof] = useState<{ connected: boolean; tokenPrefix: string | null; sitesCount: number; lastOkAt: string | null; lastError: string | null; tokensUrl: string } | null>(null);
+  const [cpToken, setCpToken] = useState('');
+
   const loadDigest = useCallback(async () => {
     const res = await fetch('/api/finances/email-schedules', { headers: authHeaders(), cache: 'no-store' });
     const data = await res.json();
@@ -138,13 +144,80 @@ export default function BooksContent() {
     }
   }, []);
 
-  // The digest email's Settings link lands on #weekly-digest, which lives on the summary tab.
+  const loadBusiness = useCallback(async () => {
+    const [sched, cp] = await Promise.all([
+      fetch('/api/finances/email-schedules?kind=business_report', { headers: authHeaders(), cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch('/api/finances/integrations/crawlproof', { headers: authHeaders(), cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]);
+    if (sched) setBizReport(sched.schedule ?? null);
+    if (cp?.crawlproof) setCrawlproof(cp.crawlproof);
+  }, []);
+
+  // The report emails' Settings links land on #weekly-digest / #business-report, on the summary tab.
   useEffect(() => {
-    if (window.location.hash !== '#weekly-digest') return;
+    const id = window.location.hash.slice(1);
+    if (id !== 'weekly-digest' && id !== 'business-report') return;
     setTab('summary');
-    const timer = setTimeout(() => document.getElementById('weekly-digest')?.scrollIntoView({ block: 'center' }), 300);
+    const timer = setTimeout(() => document.getElementById(id)?.scrollIntoView({ block: 'center' }), 300);
     return () => clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    void loadBusiness();
+  }, [loadBusiness]);
+
+  const toggleBusinessReport = async (on: boolean) => {
+    setBizBusy(true);
+    setError(null);
+    try {
+      const res = on
+        ? await fetch('/api/finances/email-schedules', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ kind: 'business_report', timezone: GUESSED_TZ, active: true }) })
+        : await fetch('/api/finances/email-schedules?kind=business_report', { method: 'DELETE', headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(readError(data, 'Could not save the business report'));
+      setNotice(on ? `Business report on. Next send ${data.schedule?.nextRunAt ? new Date(data.schedule.nextRunAt).toLocaleString() : 'soon'} to ${data.schedule?.recipients?.join(', ')}.` : 'Business report off.');
+      await loadBusiness();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the business report');
+    } finally {
+      setBizBusy(false);
+    }
+  };
+
+  const sendBusinessNow = async () => {
+    setBizBusy(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/finances/email-schedules/send-now?kind=business_report', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: '{}' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(readError(data, 'Could not send the business report'));
+      setNotice(`Business report sent to ${data.sent.join(', ')}${data.crawlproof ? ' with your CrawlProof numbers' : ''}.`);
+      void loadBusiness();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not send the business report');
+    } finally {
+      setBizBusy(false);
+    }
+  };
+
+  const connectCrawlproof = async (connect: boolean) => {
+    setBizBusy(true);
+    setError(null);
+    try {
+      const res = connect
+        ? await fetch('/api/finances/integrations/crawlproof', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ token: cpToken.trim() }) })
+        : await fetch('/api/finances/integrations/crawlproof', { method: 'DELETE', headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(readError(data, connect ? 'Could not connect CrawlProof' : 'Could not disconnect CrawlProof'));
+      setCpToken('');
+      setNotice(connect ? `CrawlProof connected: ${data.crawlproof.sitesCount} site(s).` : 'CrawlProof disconnected; the stored token was deleted.');
+      await loadBusiness();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'CrawlProof request failed');
+    } finally {
+      setBizBusy(false);
+    }
+  };
 
   useEffect(() => {
     void loadDigest();
@@ -655,6 +728,48 @@ export default function BooksContent() {
               {digest?.active && <button type="button" onClick={() => saveDigest(false)} disabled={digestBusy} className={btnSecondary}>Turn off</button>}
               {digest && <button type="button" onClick={sendDigestNow} disabled={digestBusy} className={btnSecondary}>Send now</button>}
               {digest?.lastSentAt && <span className="text-xs text-gray-500 self-center">last sent {new Date(digest.lastSentAt).toLocaleString()}</span>}
+            </div>
+          </div>
+
+          <div id="business-report" className="mt-4 rounded border border-slate-800 bg-slate-950/40 p-3">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <h3 className="text-sm font-semibold text-gray-200">
+                Business report <span className="ml-1 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-gray-400">Opt-in</span>{' '}
+                {bizReport?.active
+                  ? <span className="text-emerald-300 font-normal text-xs">on · next {bizReport.nextRunAt ? new Date(bizReport.nextRunAt).toLocaleString() : 'soon'}</span>
+                  : <span className="text-gray-500 font-normal text-xs">off</span>}
+              </h3>
+              <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                <input type="checkbox" role="switch" aria-label="Business report on" checked={Boolean(bizReport?.active)} disabled={bizBusy} onChange={(e) => toggleBusinessReport(e.target.checked)} />
+                {bizReport?.active ? 'On' : 'Off'}
+              </label>
+            </div>
+            <p className="text-xs text-gray-500 mb-2">Mondays 08:00 ({GUESSED_TZ}) to your account email: last week&apos;s payments and invoices through CoinPay, your business books, and your website traffic when CrawlProof is connected. Off unless you turn it on; every email has a one-click off link.</p>
+            <div className="flex flex-wrap gap-2">
+              {bizReport?.active && <button type="button" onClick={sendBusinessNow} disabled={bizBusy} className={btnSecondary}>Send now</button>}
+              {bizReport?.lastSentAt && <span className="text-xs text-gray-500 self-center">last sent {new Date(bizReport.lastSentAt).toLocaleString()}</span>}
+            </div>
+
+            <div id="connect-crawlproof" className="mt-3 border-t border-slate-800 pt-3">
+              <h4 className="text-xs font-semibold text-gray-300 mb-1">
+                CrawlProof{' '}
+                {crawlproof?.connected
+                  ? <span className="text-emerald-300 font-normal">connected · {crawlproof.tokenPrefix}… · {crawlproof.sitesCount} site(s){crawlproof.lastError ? ` · last read failed: ${crawlproof.lastError}` : ''}</span>
+                  : <span className="text-gray-500 font-normal">not connected</span>}
+              </h4>
+              {crawlproof?.connected ? (
+                <button type="button" onClick={() => connectCrawlproof(false)} disabled={bizBusy} className={btnSecondary}>Disconnect</button>
+              ) : (
+                <>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Adds visitors, bot and AI-agent hits, top pages and trend for your sites. In CrawlProof, generate an API token with <em>Read-only</em> ticked (<a href={crawlproof?.tokensUrl ?? 'https://crawlproof.com/dashboard/api-tokens'} target="_blank" rel="noreferrer" className="underline">CrawlProof API tokens</a>) and paste it here. Full-access tokens are refused; the token is stored encrypted and only reads your stats.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <input type="password" autoComplete="off" value={cpToken} onChange={(e) => setCpToken(e.target.value)} placeholder="crp_…" className={`${inputClass} w-72`} />
+                    <button type="button" onClick={() => connectCrawlproof(true)} disabled={bizBusy || !cpToken.trim()} className={btnPrimary}>Connect CrawlProof</button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </section>

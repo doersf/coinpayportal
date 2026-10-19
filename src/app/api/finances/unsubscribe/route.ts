@@ -6,8 +6,8 @@ import { escapeHtml } from '@/lib/finances/render';
 export const dynamic = 'force-dynamic';
 
 /**
- * One-click unsubscribe from a finance default report (the daily summary or
- * the weekly digest), no login: the signed token (`?t=`) names the merchant,
+ * One-click unsubscribe from a finance report (the daily summary, the weekly
+ * digest or the opt-in business report), no login: the signed token (`?t=`) names the merchant,
  * the report and the address it was sent to.
  *
  * - POST unsubscribes. Mail clients send it themselves for the
@@ -31,6 +31,7 @@ const COPY = {
   daily_summary: { name: 'the daily summary', title: 'Unsubscribe from the daily summary', on: '<code>coinpay finances daily on</code>' },
   weekly_digest: { name: 'the weekly digest', title: 'Turn off the weekly digest', on: '<a href="/finances/books#weekly-digest">Finances settings</a>' },
   weekly_payments: { name: 'the weekly payments report', title: 'Turn off the weekly payments report', on: '<a href="/settings#weekly-payments">Settings</a>' },
+  business_report: { name: 'the business report', title: 'Turn off the business report', on: '<a href="/finances/books#business-report">Finances settings</a>' },
 } as const;
 
 export async function GET(req: NextRequest) {

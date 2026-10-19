@@ -622,6 +622,16 @@ async function runEmailJob(initial: FinanceJobRow): Promise<void> {
       await releaseWithStatus(job, 'cancelled', { error_message: 'Schedule no longer active' });
       return;
     }
+    if (schedule.kind === 'business_report') {
+      const { sendBusinessReport } = await import('./business-report');
+      const biz = await sendBusinessReport(schedule);
+      if (biz.sent.length > 0) await markDigestSent(scheduleId!);
+      await releaseWithStatus(job, biz.failed.length === 0 ? 'completed' : biz.sent.length > 0 ? 'partial' : 'failed', {
+        result: { sent: biz.sent.length, failed: biz.failed, crawlproof: biz.crawlproof },
+        ...(biz.sent.length === 0 ? { error_code: 'email_failed', error_message: biz.failed[0]?.error ?? 'send failed' } : {}),
+      });
+      return;
+    }
     if (schedule.kind === 'daily_summary') {
       const daily = await sendDailySummary(schedule);
       if (daily.sent.length > 0) await markDigestSent(scheduleId!);

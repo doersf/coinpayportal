@@ -34,8 +34,20 @@ import { escapeHtml } from './render';
  * those, never from the server clock's day.
  */
 
-export type ScheduleKind = 'weekly_digest' | 'daily_summary' | 'weekly_payments';
-export const SCHEDULE_KINDS: ScheduleKind[] = ['weekly_digest', 'daily_summary', 'weekly_payments'];
+export type ScheduleKind = 'weekly_digest' | 'daily_summary' | 'weekly_payments' | 'business_report';
+export const SCHEDULE_KINDS: ScheduleKind[] = ['weekly_digest', 'daily_summary', 'weekly_payments', 'business_report'];
+
+/**
+ * Opt-in reports: off until the owner turns one on, never created by a
+ * backfill, and nothing remembers an opt-out when it is turned off. Only the
+ * business report so far (`business-report.ts`).
+ */
+export const OPT_IN_KINDS: ScheduleKind[] = ['business_report'];
+
+/** The default reports carry an opt-out; opt-in ones have nothing to remember. */
+function isDefaultReport(kind: ScheduleKind): kind is 'weekly_digest' | 'daily_summary' | 'weekly_payments' {
+  return !OPT_IN_KINDS.includes(kind);
+}
 
 export function isScheduleKind(value: unknown): value is ScheduleKind {
   return typeof value === 'string' && (SCHEDULE_KINDS as string[]).includes(value);
@@ -46,6 +58,7 @@ const KIND_DEFAULTS: Record<ScheduleKind, { weekdays: number[]; hour: number; sc
   weekly_digest: { weekdays: [1, 5], hour: 8, scope: 'all', formats: ['pdf', 'csv'] },
   daily_summary: { weekdays: [0, 1, 2, 3, 4, 5, 6], hour: 7, scope: 'all', formats: ['html'] },
   weekly_payments: { weekdays: [1, 5], hour: 8, scope: 'all', formats: ['html'] },
+  business_report: { weekdays: [1], hour: 8, scope: 'business', formats: ['html'] },
 };
 
 export interface EmailScheduleRow {
@@ -169,7 +182,7 @@ export async function upsertSchedule(
   if (error) throw new Error(`Could not save the schedule: ${error.message}`);
   // The owner's own choice about a default report is the only thing that
   // overrides an earlier opt-out, either way.
-  {
+  if (isDefaultReport(kind)) {
     const { clearOptOut, recordOptOut } = await import('./daily-subscriptions');
     if (active) await clearOptOut(merchantId, kind);
     else await recordOptOut(merchantId, kind);
@@ -182,7 +195,7 @@ export async function deleteSchedule(merchantId: string, kind: ScheduleKind = 'w
   const supabase = getSupabaseAdmin();
   // Turning a default report off is an opt-out: recorded first, so the
   // default-subscribe backfill never puts it back.
-  {
+  if (isDefaultReport(kind)) {
     const { recordOptOut } = await import('./daily-subscriptions');
     await recordOptOut(merchantId, kind);
   }

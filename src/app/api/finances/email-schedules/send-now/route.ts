@@ -10,7 +10,8 @@ export const maxDuration = 120;
 /**
  * POST /api/finances/email-schedules/send-now — send a scheduled email
  * immediately, as a test or on demand. `?kind=daily_summary` sends the daily
- * summary; the default is the weekly digest.
+ * summary, `?kind=business_report` the business report; the default is the
+ * weekly digest.
  */
 export async function POST(req: NextRequest) {
   const guard = await requireFinanceAccess(req, 'finance.manage', { write: true });
@@ -20,6 +21,12 @@ export async function POST(req: NextRequest) {
   try {
     const schedule = await getSchedule(guard.id, kind);
     if (!schedule) return financeError('not_found', `No ${kind.replace('_', ' ')} is configured yet`, 404);
+    if (kind === 'business_report') {
+      const { sendBusinessReport } = await import('@/lib/finances/business-report');
+      const biz = await sendBusinessReport(schedule);
+      if (biz.sent.length > 0) await markDigestSent(schedule.id);
+      return financeJson(biz, biz.sent.length > 0 ? 200 : 502);
+    }
     if (kind === 'weekly_payments') {
       const weekly = await sendWeeklyPayments(schedule);
       if (weekly.skipped) return financeJson({ ...weekly, message: 'No payments or invoices in the last seven days; nothing sent' });
