@@ -331,6 +331,7 @@ export async function certificateData(supabase: SupabaseClient, doc: DocumentRow
     supabase.from('document_events').select(EVENT_COLUMNS).eq('document_id', doc.id).order('id'),
     supabase.from('businesses').select('name').eq('id', doc.business_id).maybeSingle(),
   ]);
+  type Ev = { created_at: string; event: string; actor_label: string | null; ip: string | null; detail: { version?: number } | null };
   return {
     business_name: (business.data?.name as string) || 'CoinPay business',
     completed_at: doc.completed_at,
@@ -346,9 +347,15 @@ export async function certificateData(supabase: SupabaseClient, doc: DocumentRow
         signature_ip: s.signature_ip,
         signature_user_agent: s.signature_user_agent,
       })),
-    events: ((events.data ?? []) as { created_at: string; event: string; actor_label: string | null; ip: string | null }[])
-      .filter((e) => ['uploaded', 'shared', 'resent', 'revoked', 'consented', 'signed', 'completed'].includes(e.event))
-      .map((e) => ({ created_at: e.created_at, event: e.event, actor_label: e.actor_label, ip: e.ip })),
+    events: ((events.data ?? []) as Ev[])
+      .filter((e) => ['uploaded', 'version_added', 'shared', 'resent', 'revoked', 'consented', 'signed', 'completed'].includes(e.event))
+      .map((e) => ({
+        created_at: e.created_at,
+        // Name the version, so the trail shows which one was signed.
+        event: e.event === 'version_added' && e.detail?.version ? `version_added:${e.detail.version}` : e.event,
+        actor_label: e.actor_label,
+        ip: e.ip,
+      })),
   };
 }
 

@@ -40,6 +40,7 @@ function input(original: Uint8Array, contentType: string, filename: string): Cer
     ],
     events: [
       { created_at: '2026-10-19T10:00:00Z', event: 'uploaded', actor_label: 'owner@example.com', ip: '198.51.100.1' },
+      { created_at: '2026-10-19T10:30:00Z', event: 'version_added:2', actor_label: 'editor@example.com', ip: null },
       { created_at: '2026-10-19T12:00:02Z', event: 'completed', actor_label: null, ip: null },
     ],
     completedAt: '2026-10-19T12:00:02Z',
