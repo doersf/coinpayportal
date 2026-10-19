@@ -10,8 +10,9 @@ import { Providers } from '@/components/Providers';
 import './globals.css';
 import { serializeJsonLd } from '@/lib/seo/json-ld';
 
-// Re-render static pages hourly so the pit.world global footer (fetched
-// server-side in PitFooter) picks up changes without a redeploy.
+// Re-render static pages hourly so the shared footers (@profullstack/footer,
+// rendered from its @latest template, and the pit.world global footer fetched
+// in PitFooter) pick up releases without a redeploy.
 // force-dynamic routes keep their own setting.
 export const revalidate = 3600;
 

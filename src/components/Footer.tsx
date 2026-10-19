@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Footer as ProfullstackFooter } from '@profullstack/footer/react';
 
 const links = [
   { name: 'Docs', href: '/docs' },
@@ -21,44 +22,49 @@ export default function Footer() {
   const onionUrl = process.env.NEXT_PUBLIC_ONION_URL;
 
   return (
-    <footer className="bg-slate-900 border-t border-slate-800 text-sm text-gray-400">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 space-y-3">
-        <nav className="flex flex-wrap justify-center gap-x-5 gap-y-2" aria-label="Footer">
-          {links.map((link) =>
-            link.href.startsWith('http') ? (
-              <a key={link.name} href={link.href} target="_blank" rel="noopener noreferrer" className={linkClass}>
-                {link.name}
-              </a>
-            ) : (
-              <Link key={link.name} href={link.href} className={linkClass}>
-                {link.name}
-              </Link>
-            )
-          )}
-        </nav>
-        <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs">
-          <span>© {new Date().getFullYear()} CoinPay · Profullstack, Inc.</span>
-          <a href="mailto:support@coinpayportal.com" className={linkClass}>
-            support@coinpayportal.com
-          </a>
-          <a href="tel:+18885264640" className={linkClass}>
-            +1-888-526-4640
-          </a>
-          {onionUrl && (
-            <a href={onionUrl} target="_blank" rel="noopener noreferrer" title={onionUrl} className={linkClass}>
-              Tor mirror
+    <>
+      <footer className="bg-slate-900 border-t border-slate-800 text-sm text-gray-400">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 space-y-3">
+          <nav className="flex flex-wrap justify-center gap-x-5 gap-y-2" aria-label="Footer">
+            {links.map((link) =>
+              link.href.startsWith('http') ? (
+                <a key={link.name} href={link.href} target="_blank" rel="noopener noreferrer" className={linkClass}>
+                  {link.name}
+                </a>
+              ) : (
+                <Link key={link.name} href={link.href} className={linkClass}>
+                  {link.name}
+                </Link>
+              )
+            )}
+          </nav>
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs">
+            <a href="mailto:support@coinpayportal.com" className={linkClass}>
+              support@coinpayportal.com
             </a>
-          )}
-          <a href="https://built.indie.pit.world/p/coinpay?ref=badge">
-            <img
-              src="https://built.indie.pit.world/badge/coinpay.svg"
-              alt="CoinPay on built.indie"
-              width="150"
-              height="33"
-            />
-          </a>
+            <a href="tel:+18885264640" className={linkClass}>
+              +1-888-526-4640
+            </a>
+            {onionUrl && (
+              <a href={onionUrl} target="_blank" rel="noopener noreferrer" title={onionUrl} className={linkClass}>
+                Tor mirror
+              </a>
+            )}
+            <a href="https://built.indie.pit.world/p/coinpay?ref=badge">
+              <img
+                src="https://built.indie.pit.world/badge/coinpay.svg"
+                alt="CoinPay on built.indie"
+                width="150"
+                height="33"
+              />
+            </a>
+          </div>
         </div>
+      </footer>
+      {/* Copyright and the Profullstack webring: @profullstack/footer, server-rendered. */}
+      <div className="bg-slate-900 text-gray-400">
+        <ProfullstackFooter site="https://coinpayportal.com/" />
       </div>
-    </footer>
+    </>
   );
 }
