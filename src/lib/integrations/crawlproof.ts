@@ -22,7 +22,8 @@ import { audit } from '../finances/audit';
 
 export const CRAWLPROOF_SCOPE = 'stats:read';
 const TOKEN_RE = /^crp_[A-Za-z0-9_-]{43}$/;
-const TIMEOUT_MS = 10_000;
+// An account with many sites takes a while: the report reads each one (up to 25).
+const TIMEOUT_MS = 30_000;
 
 export type CrawlProofRange = '1w' | '1m';
 
