@@ -38,6 +38,12 @@ export type FinanceErrorCode =
   | 'feature_disabled'
   | 'storage_error'
   | 'cross_site_request'
+  | 'forbidden'
+  | 'crawlproof_token_rejected'
+  | 'crawlproof_token_not_read_only'
+  | 'crawlproof_unreachable'
+  | 'crawlproof_error'
+  | 'crawlproof_bad_response'
   | 'internal_error';
 
 export interface FinanceErrorBody {
