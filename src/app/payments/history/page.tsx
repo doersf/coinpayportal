@@ -5,6 +5,28 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authFetch } from '@/lib/auth/client';
 
+// Crypto payments and card transactions use different status sets (as stored in
+// payments.status and stripe_transactions.status; the crypto list is exactly the
+// payments CHECK constraint). A crypto payment is never "completed": it is
+// confirmed on chain, then forwarded to the merchant.
+const CRYPTO_STATUSES: { value: string; label: string }[] = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'forwarding', label: 'Forwarding' },
+  { value: 'forwarded', label: 'Forwarded' },
+  { value: 'forwarding_failed', label: 'Forwarding failed' },
+  { value: 'expired', label: 'Expired' },
+];
+const CARD_STATUSES: { value: string; label: string }[] = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'expired', label: 'Expired' },
+  { value: 'duplicate', label: 'Duplicate' },
+];
+const isCryptoStatus = (s: string) => CRYPTO_STATUSES.some((o) => o.value === s);
+const isCardStatus = (s: string) => CARD_STATUSES.some((o) => o.value === s);
+
 interface CryptoPayment {
   id: string;
   business_id: string;
@@ -88,45 +110,29 @@ export default function PaymentHistoryPage() {
     try {
       setLoading(true);
       
-      const promises = [];
+      // A status only one source has filters the other source out entirely.
+      const wantCrypto = (activeTab === 'all' || activeTab === 'crypto') && (!selectedStatus || isCryptoStatus(selectedStatus));
+      const wantCard = (activeTab === 'all' || activeTab === 'card') && (!selectedStatus || isCardStatus(selectedStatus));
 
-      // Fetch crypto payments if needed
-      if (activeTab === 'all' || activeTab === 'crypto') {
-        const cryptoParams = new URLSearchParams();
-        if (selectedBusiness) cryptoParams.append('business_id', selectedBusiness);
-        if (selectedStatus) cryptoParams.append('status', selectedStatus);
-        if (selectedCurrency) cryptoParams.append('currency', selectedCurrency);
-        if (dateFrom) cryptoParams.append('date_from', dateFrom);
-        if (dateTo) cryptoParams.append('date_to', dateTo);
-        cryptoParams.append('limit', '100'); // Get more for history page
+      const cryptoParams = new URLSearchParams();
+      if (selectedBusiness) cryptoParams.append('business_id', selectedBusiness);
+      if (selectedStatus) cryptoParams.append('status', selectedStatus);
+      if (selectedCurrency) cryptoParams.append('currency', selectedCurrency);
+      if (dateFrom) cryptoParams.append('date_from', dateFrom);
+      if (dateTo) cryptoParams.append('date_to', dateTo);
+      cryptoParams.append('limit', '100'); // Get more for history page
 
-        promises.push(authFetch(`/api/payments?${cryptoParams}`, {}, router));
-      }
+      const cardParams = new URLSearchParams();
+      if (selectedBusiness) cardParams.append('business_id', selectedBusiness);
+      if (selectedStatus) cardParams.append('status', selectedStatus);
+      if (dateFrom) cardParams.append('date_from', dateFrom);
+      if (dateTo) cardParams.append('date_to', dateTo);
+      cardParams.append('limit', '100');
 
-      // Fetch card transactions if needed  
-      if (activeTab === 'all' || activeTab === 'card') {
-        const cardParams = new URLSearchParams();
-        if (selectedBusiness) cardParams.append('business_id', selectedBusiness);
-        if (selectedStatus) cardParams.append('status', selectedStatus);
-        if (dateFrom) cardParams.append('date_from', dateFrom);
-        if (dateTo) cardParams.append('date_to', dateTo);
-        cardParams.append('limit', '100');
-
-        promises.push(authFetch(`/api/stripe/transactions?${cardParams}`, {}, router));
-      }
-
-      const results = await Promise.all(promises);
-      
-      let cryptoResults = null;
-      let cardResults = null;
-
-      if (activeTab === 'all') {
-        [cryptoResults, cardResults] = results;
-      } else if (activeTab === 'crypto') {
-        [cryptoResults] = results;
-      } else if (activeTab === 'card') {
-        [cardResults] = results;
-      }
+      const [cryptoResults, cardResults] = await Promise.all([
+        wantCrypto ? authFetch(`/api/payments?${cryptoParams}`, {}, router) : null,
+        wantCard ? authFetch(`/api/stripe/transactions?${cardParams}`, {}, router) : null,
+      ]);
 
       // Process crypto results
       if (cryptoResults && cryptoResults.response.ok && cryptoResults.data.success) {
@@ -152,6 +158,10 @@ export default function PaymentHistoryPage() {
 
   const handleTabChange = (tab: TabType) => {
     setActiveTab(tab);
+    // Drop a status the new tab does not have (e.g. "forwarded" on the card tab).
+    if (selectedStatus && ((tab === 'crypto' && !isCryptoStatus(selectedStatus)) || (tab === 'card' && !isCardStatus(selectedStatus)))) {
+      setSelectedStatus('');
+    }
   };
 
   const exportToCSV = () => {
@@ -261,11 +271,15 @@ export default function PaymentHistoryPage() {
       case 'completed':
       case 'forwarded':
         return 'text-green-600 bg-green-100';
+      case 'confirmed':
+      case 'forwarding':
+        return 'text-blue-600 bg-blue-100';
       case 'pending':
       case 'detected':
         return 'text-yellow-600 bg-yellow-100';
       case 'failed':
       case 'expired':
+      case 'forwarding_failed':
         return 'text-red-600 bg-red-100';
       default:
         return 'text-gray-600 bg-gray-100';
@@ -615,11 +629,18 @@ export default function PaymentHistoryPage() {
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700"
               >
                 <option value="">All Statuses</option>
-                <option value="pending">Pending</option>
-                <option value="detected">Detected</option>
-                <option value="completed">Completed</option>
-                <option value="failed">Failed</option>
-                <option value="expired">Expired</option>
+                {activeTab === 'all' ? (
+                  <>
+                    <optgroup label="Crypto">
+                      {CRYPTO_STATUSES.map((o) => <option key={`c-${o.value}`} value={o.value}>{o.label}</option>)}
+                    </optgroup>
+                    <optgroup label="Card only">
+                      {CARD_STATUSES.filter((o) => !isCryptoStatus(o.value)).map((o) => <option key={`k-${o.value}`} value={o.value}>{o.label}</option>)}
+                    </optgroup>
+                  </>
+                ) : (
+                  (activeTab === 'crypto' ? CRYPTO_STATUSES : CARD_STATUSES).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)
+                )}
               </select>
             </div>
 
