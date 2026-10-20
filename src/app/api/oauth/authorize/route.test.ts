@@ -183,6 +183,65 @@ describe('GET /api/oauth/authorize', () => {
     expect(location).toContain('code=');
     expect(location).toContain('state=xyz');
   });
+
+  describe('prompt', () => {
+    const base = 'https://coinpay.dev/api/oauth/authorize?response_type=code&client_id=cp_test&redirect_uri=https://example.com/cb&scope=openid+profile&state=xyz';
+    const signedIn = { headers: { authorization: 'Bearer valid-token' } };
+
+    beforeEach(() => {
+      (validateClient as any).mockResolvedValue({ valid: true, client: { client_id: 'cp_test', name: 'Test' } });
+      (verifyToken as any).mockReturnValue({ userId: 'user-123', email: 'test@example.com' });
+      mockSingle.mockResolvedValue({ data: { scopes: ['openid', 'profile'] }, error: null });
+    });
+
+    it('select_account shows the consent screen even when already approved', async () => {
+      const res = await GET(makeRequest(`${base}&prompt=select_account`, signedIn));
+      expect(res.headers.get('location')).toContain('/oauth/consent');
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
+
+    it('consent shows the consent screen even when already approved', async () => {
+      const res = await GET(makeRequest(`${base}&prompt=consent`, signedIn));
+      expect(res.headers.get('location')).toContain('/oauth/consent');
+    });
+
+    it('login sends a signed-in user to /login, returning without prompt=login', async () => {
+      const res = await GET(makeRequest(`${base}&prompt=login`, signedIn));
+      const location = new URL(res.headers.get('location')!);
+      expect(location.pathname).toBe('/login');
+      const back = location.searchParams.get('redirect')!;
+      expect(back.startsWith('/api/oauth/authorize?')).toBe(true);
+      expect(back).not.toContain('prompt');
+      expect(back).toContain('state=xyz');
+    });
+
+    it('a signed-out select_account does not ask again after login', async () => {
+      (verifyToken as any).mockImplementation(() => { throw new Error('invalid'); });
+      const res = await GET(makeRequest(`${base}&prompt=select_account+consent`));
+      const back = new URL(res.headers.get('location')!).searchParams.get('redirect')!;
+      expect(back).toContain('prompt=consent');
+      expect(back).not.toContain('select_account');
+    });
+
+    it('none answers login_required instead of showing a page', async () => {
+      (verifyToken as any).mockImplementation(() => { throw new Error('invalid'); });
+      const res = await GET(makeRequest(`${base}&prompt=none`));
+      const location = res.headers.get('location')!;
+      expect(location).toContain('https://example.com/cb');
+      expect(location).toContain('error=login_required');
+    });
+
+    it('none answers consent_required when not yet approved', async () => {
+      mockSingle.mockResolvedValue({ data: null, error: { message: 'not found' } });
+      const res = await GET(makeRequest(`${base}&prompt=none`, signedIn));
+      expect(res.headers.get('location')).toContain('error=consent_required');
+    });
+
+    it('none still issues a code silently when approved', async () => {
+      const res = await GET(makeRequest(`${base}&prompt=none`, signedIn));
+      expect(res.headers.get('location')).toContain('code=');
+    });
+  });
 });
 
 describe('POST /api/oauth/authorize', () => {

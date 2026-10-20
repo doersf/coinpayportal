@@ -11,6 +11,7 @@ function ConsentContent() {
   const [appName, setAppName] = useState<string>('');
   const [appDescription, setAppDescription] = useState<string>('');
   const [error, setError] = useState<string>('');
+  const [account, setAccount] = useState<string | null>(null);
 
   const clientId = searchParams.get('client_id') || '';
   const redirectUri = searchParams.get('redirect_uri') || '';
@@ -40,6 +41,25 @@ function ConsentContent() {
     }
     if (clientId) fetchClient();
   }, [clientId]);
+
+  useEffect(() => {
+    fetch('/api/oauth/session', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setAccount(data?.signed_in ? data.email || 'your CoinPay account' : null))
+      .catch(() => setAccount(null));
+  }, []);
+
+  // Back through authorize after signing in as someone else; prompt=login
+  // sends there even though this browser already has a session.
+  function switchAccountHref() {
+    const params = new URLSearchParams({ response_type: 'code', client_id: clientId, redirect_uri: redirectUri, scope });
+    if (state) params.set('state', state);
+    if (codeChallenge) params.set('code_challenge', codeChallenge);
+    if (codeChallengeMethod) params.set('code_challenge_method', codeChallengeMethod);
+    if (nonce) params.set('nonce', nonce);
+    params.set('prompt', 'login');
+    return `/api/oauth/authorize?${params.toString()}`;
+  }
 
   async function handleConsent(action: 'approve' | 'deny') {
     setLoading(true);
@@ -88,6 +108,17 @@ function ConsentContent() {
         </div>
 
         <div className="bg-slate-800 rounded-lg shadow-lg p-8">
+          {account && (
+            <div data-testid="signed-in-as" className="mb-6 flex items-center justify-between gap-3 p-3 bg-slate-900/60 rounded-lg text-sm">
+              <span className="text-gray-300">
+                Signed in as <span className="font-medium text-white">{account}</span>
+              </span>
+              <a href={switchAccountHref()} className="text-blue-400 hover:text-blue-300 whitespace-nowrap">
+                Use a different account
+              </a>
+            </div>
+          )}
+
           {appDescription && (
             <p className="text-gray-300 text-sm mb-6">{appDescription}</p>
           )}

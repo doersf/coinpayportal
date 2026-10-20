@@ -8,7 +8,7 @@ import { createClient } from '@supabase/supabase-js';
 import { validateClient } from '@/lib/oauth/client';
 import { validateScopes } from '@/lib/oauth/scopes';
 import { generateAuthorizationCode } from '@/lib/oauth/tokens';
-import { verifyToken } from '@/lib/auth/jwt';
+import { getSessionUser } from '@/lib/oauth/session-user';
 
 function getSupabase() {
   return createClient(
@@ -33,43 +33,19 @@ function getPublicOrigin(requestUrl: URL): string {
   return process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || requestUrl.origin;
 }
 
-/**
- * Extract authenticated user from request cookies/headers
- */
-async function getAuthenticatedUser(request: NextRequest): Promise<{ id: string; email?: string } | null> {
-  // Try Authorization header first
-  const authHeader = request.headers.get('authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
-    try {
-      const secret = process.env.JWT_SECRET;
-      if (!secret) return null;
-      const decoded = verifyToken(token, secret);
-      if (decoded?.userId) {
-        return { id: decoded.userId, email: decoded.email };
-      }
-    } catch {
-      // Fall through
-    }
-  }
+/** The authorize URL as a same-origin path, with some `prompt` values dropped. */
+function authorizePathWithout(url: URL, drop: string[]): string {
+  const next = new URL(url.toString());
+  const kept = (next.searchParams.get('prompt') || '').split(' ').filter((p) => p && !drop.includes(p));
+  if (kept.length) next.searchParams.set('prompt', kept.join(' '));
+  else next.searchParams.delete('prompt');
+  return next.pathname + next.search;
+}
 
-  // Try cookie-based session
-  const sessionCookie = request.cookies.get('session')?.value
-    || request.cookies.get('token')?.value;
-  if (sessionCookie) {
-    try {
-      const secret = process.env.JWT_SECRET;
-      if (!secret) return null;
-      const decoded = verifyToken(sessionCookie, secret);
-      if (decoded?.userId) {
-        return { id: decoded.userId, email: decoded.email };
-      }
-    } catch {
-      // Not authenticated
-    }
-  }
-
-  return null;
+function loginRedirect(url: URL, returnPath: string) {
+  const loginUrl = new URL('/login', getPublicOrigin(url));
+  loginUrl.searchParams.set('redirect', returnPath);
+  return NextResponse.redirect(loginUrl.toString(), 302);
 }
 
 /**
@@ -85,6 +61,9 @@ export async function GET(request: NextRequest) {
   const codeChallenge = url.searchParams.get('code_challenge') || undefined;
   const codeChallengeMethod = url.searchParams.get('code_challenge_method') || undefined;
   const nonce = url.searchParams.get('nonce') || undefined;
+  // OIDC `prompt`: login (sign in again), select_account / consent (always ask,
+  // never approve silently), none (never show a page).
+  const prompt = new Set((url.searchParams.get('prompt') || '').split(' ').filter(Boolean));
 
   // Validate required params
   if (responseType !== 'code') {
@@ -142,15 +121,21 @@ export async function GET(request: NextRequest) {
     return oauthError(redirectUri, 'invalid_scope', 'No valid scopes requested for this client', state);
   }
 
+  if (prompt.has('none') && prompt.size > 1) {
+    return oauthError(redirectUri, 'invalid_request', 'prompt=none cannot be combined with other prompt values', state);
+  }
+
   // Check authentication
-  const user = await getAuthenticatedUser(request);
+  const user = await getSessionUser(request);
   if (!user) {
-    // Redirect to login with return URL
-    const publicOrigin = getPublicOrigin(url);
-    const returnUrl = url.pathname + url.search;
-    const loginUrl = new URL('/login', publicOrigin);
-    loginUrl.searchParams.set('redirect', returnUrl);
-    return NextResponse.redirect(loginUrl.toString(), 302);
+    if (prompt.has('none')) return oauthError(redirectUri, 'login_required', 'User is not signed in', state);
+    // Signing in here already picks the account, so do not ask again after.
+    return loginRedirect(url, authorizePathWithout(url, ['login', 'select_account']));
+  }
+
+  // Sign in again even with a session: the way to reach a different account.
+  if (prompt.has('login')) {
+    return loginRedirect(url, authorizePathWithout(url, ['login', 'select_account']));
   }
 
   // Check existing consent
@@ -165,7 +150,9 @@ export async function GET(request: NextRequest) {
   if (existingConsent) {
     // Check if all requested scopes are already consented
     const allConsented = scopes.every((s) => existingConsent.scopes.includes(s));
-    if (allConsented) {
+    // select_account and consent always show the consent screen, which names
+    // the signed-in account and offers a different one.
+    if (allConsented && !prompt.has('select_account') && !prompt.has('consent')) {
       // Generate code directly
       const code = generateAuthorizationCode();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
@@ -190,6 +177,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(callbackUrl.toString(), 302);
     }
   }
+
+  if (prompt.has('none')) return oauthError(redirectUri, 'consent_required', 'User has not approved this app', state);
 
   // Redirect to consent page
   const consentUrl = new URL('/oauth/consent', getPublicOrigin(url));
@@ -245,7 +234,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Check user authentication
-  const user = await getAuthenticatedUser(request);
+  const user = await getSessionUser(request);
   if (!user) {
     return NextResponse.json(
       { error: 'login_required', error_description: 'User is not authenticated' },
