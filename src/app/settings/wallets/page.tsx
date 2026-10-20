@@ -215,9 +215,6 @@ export default function GlobalWalletsPage() {
       if (parsed.invalidLines.length > 0) {
         notices.push(`ignored invalid lines: ${parsed.invalidLines.join(', ')}`);
       }
-      if (parsed.duplicateCryptocurrencies.length > 0) {
-        notices.push(`used the last value for duplicates: ${parsed.duplicateCryptocurrencies.join(', ')}`);
-      }
       if (failed.length > 0) {
         notices.push(`failed to save: ${failed.join(', ')}`);
       }
@@ -227,7 +224,11 @@ export default function GlobalWalletsPage() {
           added > 0 ? `added ${added}` : null,
           updated > 0 ? `updated ${updated}` : null,
         ].filter(Boolean).join(', ');
-        setSuccess(`Wallet import complete: ${summary}.`);
+        // A coin pasted twice is not a failure: say which address won, in the success line.
+        const dupes = parsed.duplicateCryptocurrencies.length > 0
+          ? ` Listed twice, kept the last address: ${parsed.duplicateCryptocurrencies.join(', ')}.`
+          : '';
+        setSuccess(`Wallet import complete: ${summary}.${dupes}`);
         fetchWallets();
       }
 
