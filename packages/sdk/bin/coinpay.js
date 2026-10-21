@@ -5244,6 +5244,8 @@ async function handleFinances(subcommand, args, flags) {
     case 'reports':
     case 'statements':
     case 'books':
+    case 'pnl':
+    case 'profit-loss':
     case 'payloads':
     case 'digest':
     case 'due':
@@ -5264,7 +5266,7 @@ async function handleFinances(subcommand, args, flags) {
 
     default:
       print.error(`Unknown finances command: ${subcommand}`);
-      console.log('Usage: coinpay finances [tui|summary|accounts|ledger|connections|sync|connect|disconnect|backfill|jobs|coverage|report|reports|statements|books|payloads|digest|due|recurring|due-day|daily]');
+      console.log('Usage: coinpay finances [tui|summary|accounts|ledger|connections|sync|connect|disconnect|backfill|jobs|coverage|report|reports|statements|books|pnl|payloads|digest|due|recurring|due-day|daily]');
       process.exit(1);
   }
 }
