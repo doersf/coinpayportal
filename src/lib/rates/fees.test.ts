@@ -334,3 +334,12 @@ describe('Tatum Fee Estimation Service', () => {
     });
   });
 });
+
+describe('Base (USDC_BASE) fee estimation', () => {
+  it('returns a fee instead of throwing "Unsupported blockchain for fee estimation: BASE"', async () => {
+    clearFeeCache();
+    const fee = await getEstimatedNetworkFee('USDC_BASE');
+    expect(fee).toBeGreaterThan(0);
+    expect(fee).toBeLessThan(1);
+  });
+});
