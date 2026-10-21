@@ -448,6 +448,15 @@ export async function checkADABalance(address: string, rpcUrl: string): Promise<
       headers: { 'project_id': apiKey },
     });
 
+    // Blockfrost answers 404 for an address that has never appeared on chain
+    // (an unpaid payment address). That is a definite zero, like XRP's
+    // actNotFound. Only Blockfrost's own JSON 404 counts: a 404 from a wrong
+    // base URL or proxy is still an unknown balance and must throw.
+    if (response.status === 404) {
+      const body = await response.json().catch(() => null);
+      if (body?.status_code === 404) return 0;
+    }
+
     if (!response.ok) {
       console.error(`Failed to fetch ADA balance for ${address}: ${response.status}`);
       throw new Error('ADA balance lookup failed');

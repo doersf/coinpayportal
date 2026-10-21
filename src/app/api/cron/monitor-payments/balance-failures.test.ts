@@ -77,6 +77,17 @@ describe('validated balances', () => {
     expect(await checkBalance('FX8QhU1TPUHGs2X8PibbHikd4YvdQMPfVuFd6mqk9qJw', 'USDC_SOL')).toBe(0);
   });
 
+  it('ADA reads a never-used address (Blockfrost 404) as zero', async () => {
+    fetchMock.mockImplementation(async () =>
+      Response.json({ status_code: 404, error: 'Not Found', message: 'The requested component has not been found.' }, { status: 404 })
+    );
+    expect(await checkBalance(address, 'ADA')).toBe(0);
+  });
+  it('ADA rejects a non-Blockfrost 404', async () => {
+    fetchMock.mockImplementation(async () => new Response('<html>not found</html>', { status: 404 }));
+    await expect(checkBalance(address, 'ADA')).rejects.toThrow();
+  });
+
   it('rejects an unsupported chain without accessing the network', async () => {
     await expect(checkBalance(address, 'UNSUPPORTED')).rejects.toThrow();
     expect(fetchMock).not.toHaveBeenCalled();
