@@ -28,6 +28,10 @@ function PaypalReturnInner() {
   const transactionId = searchParams?.get('transaction_id') ?? null;
   // PayPal sends the payer here with cancelled=1 when they back out.
   const cancelled = !!searchParams?.get('cancelled');
+  // Set when the order came from a hosted checkout session: once captured, go
+  // back to the session, which follows the merchant's success_url.
+  const rawSession = searchParams?.get('checkout_session') ?? null;
+  const checkoutSession = rawSession && /^cs_[A-Za-z0-9]{16,64}$/.test(rawSession) ? rawSession : null;
 
   // Everything decidable from the URL is decided during render. Only the case
   // that needs a network call starts as 'working', which keeps the effect free
@@ -58,6 +62,9 @@ function PaypalReturnInner() {
 
       if (res.ok && data.success) {
         setState({ kind: 'paid', amount: data.amount ?? null, currency: data.currency ?? null });
+        if (checkoutSession) {
+          setTimeout(() => window.location.assign(`/checkout/${checkoutSession}`), 1500);
+        }
       } else {
         setState({
           kind: 'failed',
@@ -70,7 +77,7 @@ function PaypalReturnInner() {
         message: 'We could not reach CoinPay to confirm this payment.',
       });
     }
-  }, [token, transactionId]);
+  }, [token, transactionId, checkoutSession]);
 
   useEffect(() => {
     // Nothing to do unless the URL actually described a capturable payment.

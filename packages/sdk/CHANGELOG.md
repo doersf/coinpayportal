@@ -5,6 +5,15 @@ All notable changes to `@profullstack/coinpay` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-10-21
+
+### Added
+- `createCheckoutSession({ amount, customerEmail, accountId, property, metadata, successUrl, cancelUrl, expiresInMinutes, allowedMethods })`
+  and `getCheckoutSession(id)`: one hosted checkout URL where the buyer picks any coin the business can
+  receive, or PayPal. Webhooks for the resulting payment carry `checkout_session_id`, `customer_email`,
+  `account_id`, `property` and `metadata`.
+- `createPayment({ customerEmail, accountId, property })`, stored in the payment's metadata.
+
 ## [0.23.0] - 2026-10-21
 
 ### Added

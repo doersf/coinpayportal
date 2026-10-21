@@ -31,6 +31,57 @@ export interface PaymentParams {
   successUrl?: string;
   /** Where "Back to merchant" goes from an expired or abandoned checkout */
   cancelUrl?: string;
+  /** Email of the person paying; stored in metadata and sent on webhooks */
+  customerEmail?: string;
+  /** Your site's user id or handle for the payer */
+  accountId?: string;
+  /** Your site hostname */
+  property?: string;
+}
+
+/** Parameters for creating a hosted checkout session */
+export interface CheckoutSessionParams {
+  /** Amount in USD */
+  amount: number;
+  /** Only `'USD'` */
+  currency?: 'USD';
+  description?: string;
+  /** Email of the person paying (required) */
+  customerEmail: string;
+  /** Your site's user id or handle for the payer (required) */
+  accountId: string;
+  /** Your site hostname (defaults to the business name) */
+  property?: string;
+  metadata?: Record<string, unknown>;
+  /** `{CHECKOUT_SESSION_ID}` and `{PAYMENT_ID}` are filled in */
+  successUrl?: string;
+  cancelUrl?: string;
+  /** 15 to 120, default 60 */
+  expiresInMinutes?: number;
+  /** Coin codes (e.g. `'USDC_POL'`), `'CRYPTO'` or `'PAYPAL'`; default all */
+  allowedMethods?: string[];
+  /** Only with a merchant session token; a business API key implies it */
+  businessId?: string;
+}
+
+/** Response from `createCheckoutSession` */
+export interface CheckoutSessionResponse {
+  success: boolean;
+  id: string;
+  url: string;
+  status: 'open' | 'paid' | 'expired';
+  amount: number;
+  currency: 'USD';
+  description: string | null;
+  customer_email: string;
+  account_id: string;
+  property: string;
+  metadata: Record<string, unknown>;
+  success_url: string | null;
+  cancel_url: string | null;
+  expires_at: string;
+  methods: string[];
+  [key: string]: unknown;
 }
 
 /** Parameters for listing payments */
@@ -199,6 +250,15 @@ export class CoinPayClient {
    * @returns Created payment with `payment_address`, `crypto_amount`, and `qr_code`
    */
   createPayment(params: PaymentParams): Promise<CreatePaymentResponse>;
+
+  /**
+   * Create a hosted checkout session; redirect the buyer to `url`. The buyer
+   * picks any coin the business can receive, or PayPal.
+   */
+  createCheckoutSession(params: CheckoutSessionParams): Promise<CheckoutSessionResponse>;
+
+  /** Get a checkout session (`cs_...`). */
+  getCheckoutSession(sessionId: string): Promise<Record<string, unknown>>;
 
   /**
    * Get payment details by ID.

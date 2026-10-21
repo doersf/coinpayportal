@@ -255,6 +255,9 @@ export class CoinPayClient {
     metadata,
     successUrl,
     cancelUrl,
+    customerEmail,
+    accountId,
+    property,
   }) {
     // Map to API field names (snake_case)
     return this.request('/payments/create', {
@@ -268,8 +271,88 @@ export class CoinPayClient {
         metadata,
         success_url: successUrl,
         cancel_url: cancelUrl,
+        customer_email: customerEmail,
+        account_id: accountId,
+        property,
       }),
     });
+  }
+
+  /**
+   * Create a hosted checkout session.
+   *
+   * Redirect the buyer to the returned `url`. There they choose any coin your
+   * business has a wallet for (stablecoins first) or PayPal when connected.
+   * The payment and every webhook for it carry `checkout_session_id`,
+   * `customer_email`, `account_id`, `property` and your `metadata`.
+   *
+   * @param {Object} params
+   * @param {number} params.amount - Amount in USD
+   * @param {string} params.customerEmail - Email of the person paying (required)
+   * @param {string} params.accountId - Your site's user id or handle for the payer (required)
+   * @param {string} [params.property] - Your site hostname (defaults to the business name)
+   * @param {string} [params.description]
+   * @param {Object} [params.metadata]
+   * @param {string} [params.successUrl] - `{CHECKOUT_SESSION_ID}` and `{PAYMENT_ID}` are filled in
+   * @param {string} [params.cancelUrl]
+   * @param {number} [params.expiresInMinutes=60] - 15 to 120
+   * @param {string[]} [params.allowedMethods] - coin codes, 'CRYPTO' or 'PAYPAL' (default: all)
+   * @returns {Promise<{success: boolean, id: string, url: string, status: string, expires_at: string, methods: string[]}>}
+   *
+   * @example
+   * const { id, url } = await client.createCheckoutSession({
+   *   amount: 9.99,
+   *   description: 'Pro plan',
+   *   customerEmail: 'buyer@example.com',
+   *   accountId: 'user_123',
+   *   property: 'example.com',
+   *   successUrl: 'https://example.com/thanks?session={CHECKOUT_SESSION_ID}',
+   *   cancelUrl: 'https://example.com/pricing',
+   * });
+   * // res.redirect(url)
+   */
+  async createCheckoutSession({
+    amount,
+    currency = 'USD',
+    description,
+    customerEmail,
+    accountId,
+    property,
+    metadata,
+    successUrl,
+    cancelUrl,
+    expiresInMinutes,
+    allowedMethods,
+    businessId,
+  }) {
+    return this.request('/checkout/sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        amount,
+        currency,
+        description,
+        customer_email: customerEmail,
+        account_id: accountId,
+        property,
+        metadata,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        expires_in_minutes: expiresInMinutes,
+        allowed_methods: allowedMethods,
+        business_id: businessId,
+      }),
+    });
+  }
+
+  /**
+   * Get a checkout session. With your business API key the response includes
+   * the customer fields, metadata and the underlying payment ids.
+   *
+   * @param {string} sessionId - `cs_...`
+   * @returns {Promise<Object>} `{ success, session }`
+   */
+  async getCheckoutSession(sessionId) {
+    return this.request(`/checkout/sessions/${encodeURIComponent(sessionId)}`);
   }
 
   /**
