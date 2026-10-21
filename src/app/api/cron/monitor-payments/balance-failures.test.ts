@@ -44,7 +44,6 @@ describe('validated balances', () => {
     ['USDC_ETH', { result: '0x000000' }, 0],
     ['SOL', { result: { value: 0 } }, 0],
     ['SOL', { result: { value: 1500000000 } }, 1.5],
-    ['USDC_SOL', { result: { value: [] } }, 0],
     ['XRP', { result: { account_data: { Balance: '0' } } }, 0],
     ['XRP', { result: { error: 'actNotFound' } }, 0],
     ['ADA', { amount: [{ unit: 'lovelace', quantity: '1000000' }] }, 1],
@@ -69,6 +68,13 @@ describe('validated balances', () => {
   ])('%s rejects malformed/negative balances %#', async (chain, body) => {
     fetchMock.mockImplementation(async () => Response.json(body));
     await expect(checkBalance(address, chain as string)).rejects.toThrow();
+  });
+
+  it('USDC_SOL reads a never-created token account as zero', async () => {
+    fetchMock.mockImplementation(async () =>
+      Response.json({ error: { code: -32602, message: 'Invalid param: could not find account' } })
+    );
+    expect(await checkBalance('FX8QhU1TPUHGs2X8PibbHikd4YvdQMPfVuFd6mqk9qJw', 'USDC_SOL')).toBe(0);
   });
 
   it('rejects an unsupported chain without accessing the network', async () => {

@@ -5,6 +5,7 @@
  */
 
 import { isSufficientPayment } from './tolerance';
+import { getSplTokenBalance } from '@/lib/blockchain/solana-token-balance';
 import { sendPaymentWebhook } from '@/lib/webhooks/service';
 import { fetchWithTimeout } from '@/lib/http/fetch-timeout';
 import { getUsdtTronBalance } from '@/lib/tron/client';
@@ -505,47 +506,11 @@ async function checkSolanaTokenBalance(
   decimals: number
 ): Promise<BalanceResult> {
   try {
-    const response = await fetchWithTimeout(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'getTokenAccountsByOwner',
-        params: [
-          address,
-          { mint: mintAddress },
-          { encoding: 'jsonParsed' },
-        ],
-        id: 1,
-      }),
-    });
-
-    if (!response.ok) {
-      await drainResponse(response);
-      return { balance: 0, error: 'checkSolanaTokenBalance: lookup failed' };
-    }
-
-    const data = await response.json();
-    if (data.error) {
-      console.error(`[Monitor] Solana token balance RPC error for ${address}:`, data.error);
-      return { balance: 0, error: 'checkSolanaTokenBalance: lookup failed' };
-    }
-
-    const accounts = data.result?.value || [];
-    let balance = 0;
-    for (const account of accounts) {
-      const tokenAmount = account?.account?.data?.parsed?.info?.tokenAmount;
-      if (typeof tokenAmount?.uiAmount === 'number') {
-        balance += tokenAmount.uiAmount;
-      } else if (typeof tokenAmount?.amount === 'string') {
-        balance += Number(tokenAmount.amount) / 10 ** decimals;
-      }
-    }
-
-    return { balance };
+    // Associated-token-account lookup with 429 backoff; see solana-token-balance.ts.
+    return { balance: await getSplTokenBalance(address, rpcUrl, mintAddress, decimals) };
   } catch (error) {
     console.error(`[Monitor] Error checking Solana token balance for ${address}:`, error);
-    return { balance: 0, error: error instanceof Error ? error.message : String(error) };
+    return { balance: 0, error: 'checkSolanaTokenBalance: lookup failed' };
   }
 }
 

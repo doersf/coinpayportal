@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getEstimatedNetworkFee, getEstimatedNetworkFees } from '@/lib/rates/fees';
+import { isUsdtTronEnabled } from '@/lib/wallets/system-wallet';
 
 /**
  * Supported blockchains for fee estimation
  */
-const SUPPORTED_BLOCKCHAINS = [
+const BASE_BLOCKCHAINS = [
   'BTC', 'BCH', 'ETH', 'POL', 'SOL', 'DOGE', 'XRP', 'ADA', 'BNB',
   'USDT', 'USDT_ETH', 'USDT_POL', 'USDT_SOL',
-  'USDC', 'USDC_ETH', 'USDC_POL', 'USDC_SOL'
+  'USDC', 'USDC_ETH', 'USDC_POL', 'USDC_SOL', 'USDC_BASE',
 ];
+
+/** Every chain a payment can be created on; USDT_TRON only once it is enabled. */
+function supportedBlockchains(): string[] {
+  return isUsdtTronEnabled() ? [...BASE_BLOCKCHAINS, 'USDT_TRON'] : BASE_BLOCKCHAINS;
+}
 
 /**
  * GET /api/fees
@@ -22,6 +28,7 @@ const SUPPORTED_BLOCKCHAINS = [
  */
 export async function GET(request: NextRequest) {
   try {
+    const SUPPORTED_BLOCKCHAINS_NOW = supportedBlockchains();
     const { searchParams } = new URL(request.url);
     const singleBlockchain = searchParams.get('blockchain');
     const multipleBlockchains = searchParams.get('blockchains');
@@ -30,11 +37,11 @@ export async function GET(request: NextRequest) {
     if (singleBlockchain) {
       const blockchain = singleBlockchain.toUpperCase();
 
-      if (!SUPPORTED_BLOCKCHAINS.includes(blockchain)) {
+      if (!SUPPORTED_BLOCKCHAINS_NOW.includes(blockchain)) {
         return NextResponse.json(
           {
             success: false,
-            error: `Unsupported blockchain: ${blockchain}. Supported: ${SUPPORTED_BLOCKCHAINS.join(', ')}`
+            error: `Unsupported blockchain: ${blockchain}. Supported: ${SUPPORTED_BLOCKCHAINS_NOW.join(', ')}`
           },
           { status: 400 }
         );
@@ -58,20 +65,20 @@ export async function GET(request: NextRequest) {
       blockchainsToFetch = multipleBlockchains
         .split(',')
         .map(b => b.trim().toUpperCase())
-        .filter(b => SUPPORTED_BLOCKCHAINS.includes(b));
+        .filter(b => SUPPORTED_BLOCKCHAINS_NOW.includes(b));
 
       if (blockchainsToFetch.length === 0) {
         return NextResponse.json(
           {
             success: false,
-            error: `No valid blockchains provided. Supported: ${SUPPORTED_BLOCKCHAINS.join(', ')}`
+            error: `No valid blockchains provided. Supported: ${SUPPORTED_BLOCKCHAINS_NOW.join(', ')}`
           },
           { status: 400 }
         );
       }
     } else {
       // Return all supported blockchains
-      blockchainsToFetch = SUPPORTED_BLOCKCHAINS;
+      blockchainsToFetch = SUPPORTED_BLOCKCHAINS_NOW;
     }
 
     const fees = await getEstimatedNetworkFees(blockchainsToFetch);

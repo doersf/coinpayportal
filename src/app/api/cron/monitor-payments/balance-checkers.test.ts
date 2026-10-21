@@ -7,6 +7,7 @@ vi.mock('bitcoinjs-lib', () => ({
 }));
 
 import { checkBalance } from './balance-checkers';
+import { associatedTokenAddress } from '@/lib/blockchain/solana-token-balance';
 
 const originalFetch = global.fetch;
 const mockFetch = vi.fn();
@@ -82,78 +83,36 @@ describe('cron balance checkers', () => {
     expect(body.method).toBe('eth_getBalance');
   });
 
-  it('uses getTokenAccountsByOwner for USDT_SOL', async () => {
+  it('reads the USDT_SOL associated token account with getTokenAccountBalance', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({
-        jsonrpc: '2.0',
-        result: {
-          value: [
-            {
-              account: {
-                data: {
-                  parsed: {
-                    info: {
-                      tokenAmount: {
-                        amount: '2500000',
-                        decimals: 6,
-                        uiAmount: 2.5,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          ],
-        },
-        id: 1,
-      }),
+      status: 200,
+      json: async () => ({ jsonrpc: '2.0', result: { value: { amount: '2500000', decimals: 6 } }, id: 1 }),
     });
 
-    const balance = await checkBalance('FX8QhU1TPUHGs2X8PibbHikd4YvdQMPfVuFd6mqk9qJw', 'USDT_SOL');
+    const owner = 'FX8QhU1TPUHGs2X8PibbHikd4YvdQMPfVuFd6mqk9qJw';
+    const balance = await checkBalance(owner, 'USDT_SOL');
 
     expect(balance).toBe(2.5);
     const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(opts.body as string);
-    expect(body.method).toBe('getTokenAccountsByOwner');
-    expect(body.params[1]).toEqual({ mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB' });
-    expect(body.params[2]).toEqual({ encoding: 'jsonParsed' });
+    expect(body.method).toBe('getTokenAccountBalance');
+    expect(body.params[0]).toBe(associatedTokenAddress(owner, 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'));
   });
 
-  it('uses getTokenAccountsByOwner for USDC_SOL instead of native SOL balance', async () => {
+  it('reads USDC_SOL from its token account, not the native SOL balance', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({
-        jsonrpc: '2.0',
-        result: {
-          value: [
-            {
-              account: {
-                data: {
-                  parsed: {
-                    info: {
-                      tokenAmount: {
-                        amount: '50500000',
-                        decimals: 6,
-                        uiAmount: 50.5,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          ],
-        },
-        id: 1,
-      }),
+      status: 200,
+      json: async () => ({ jsonrpc: '2.0', result: { value: { amount: '50500000', decimals: 6 } }, id: 1 }),
     });
 
-    const balance = await checkBalance('FX8QhU1TPUHGs2X8PibbHikd4YvdQMPfVuFd6mqk9qJw', 'USDC_SOL');
+    const owner = 'FX8QhU1TPUHGs2X8PibbHikd4YvdQMPfVuFd6mqk9qJw';
+    const balance = await checkBalance(owner, 'USDC_SOL');
 
     expect(balance).toBe(50.5);
-    const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(opts.body as string);
-    expect(body.method).toBe('getTokenAccountsByOwner');
-    expect(body.params[1]).toEqual({ mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' });
+    const body = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(body.method).toBe('getTokenAccountBalance');
+    expect(body.params[0]).toBe(associatedTokenAddress(owner, 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'));
   });
 });

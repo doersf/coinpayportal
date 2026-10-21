@@ -6,6 +6,7 @@
  */
 
 import { getUsdtTronBalance } from '@/lib/tron/client';
+import { getSplTokenBalance } from '@/lib/blockchain/solana-token-balance';
 import * as bitcoin from 'bitcoinjs-lib';
 import { fetchWithTimeout } from '@/lib/http/fetch-timeout';
 import { evmRpcCall, type EvmBaseChain } from '@/lib/web-wallet/evm-rpc';
@@ -384,44 +385,9 @@ export async function checkSolanaTokenBalance(
   decimals: number = 6
 ): Promise<number> {
   try {
-    const response = await fetchWithTimeout(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'getTokenAccountsByOwner',
-        params: [
-          address,
-          { mint: mintAddress },
-          { encoding: 'jsonParsed' },
-        ],
-        id: 1,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`Failed to fetch Solana token balance for ${address}: ${response.status} - ${errorText}`);
-      throw new Error('SPL token balance lookup failed');
-    }
-
-    const data = await response.json();
-    if (data.error) {
-      console.error(`RPC error for Solana token balance ${address}:`, data.error);
-      throw new Error('SPL token RPC balance lookup failed');
-    }
-
-    const accounts = data?.result?.value;
-    if (!Array.isArray(accounts)) throw new Error('Invalid token account response');
-    let totalBalance = 0;
-
-    for (const account of accounts) {
-      const tokenAmount = account?.account?.data?.parsed?.info?.tokenAmount;
-      if (tokenAmount?.decimals !== decimals) throw new Error('Unexpected token decimals');
-      totalBalance += decimalString(tokenAmount?.amount, true) / 10 ** decimals;
-    }
-
-    return nonnegativeNumber(totalBalance);
+    // Associated-token-account lookup with 429 backoff; see solana-token-balance.ts
+    // for why getTokenAccountsByOwner never worked against the public RPC.
+    return nonnegativeNumber(await getSplTokenBalance(address, rpcUrl, mintAddress, decimals));
   } catch (error) {
     console.error(`Error checking Solana token balance for ${address}:`, error);
     throw new Error('Unable to determine SPL token balance', { cause: error });

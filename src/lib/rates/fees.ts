@@ -46,6 +46,15 @@ const STATIC_FEES_USD: Record<string, number> = {
 };
 
 /**
+ * Base (USDC_BASE): an L2 ERC-20 transfer is fractions of a cent; a sweep is
+ * two transfers plus the relayer's gas top-up. Payments on USDC_BASE were
+ * refused with "Unsupported blockchain for fee estimation: BASE" while
+ * /api/supported-coins advertised the chain. Kept out of STATIC_FEES_USD,
+ * which is keyed by payable symbols (BASE is a network, not a coin).
+ */
+const BASE_FEE_USD = 0.02;
+
+/**
  * Get Tatum API key from environment
  */
 function getApiKey(): string {
@@ -281,6 +290,9 @@ export async function getEstimatedNetworkFee(blockchain: string): Promise<number
     case 'USDC':
       // Stablecoins on Ethereum, use ETH fee estimate
       fee = await estimateEthereumFee();
+      break;
+    case 'BASE':
+      fee = BASE_FEE_USD;
       break;
     case 'TRON':
       fee = await estimateTronUsdtFee();
