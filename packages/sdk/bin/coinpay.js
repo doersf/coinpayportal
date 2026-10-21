@@ -710,6 +710,9 @@ ${colors.cyan}Commands:${colors.reset}
     books summary         Totals by tax category (--period 2026|2026-Q3|2026-08, --scope)
     books export          CPA pack (--period, --scope, --format csv|pdf|html|json, --output;
                             --with-documents: a ZIP with the period's tax documents, up to 8 MiB)
+    pnl                   Profit and loss, personal and business as separate files
+                            (--scope personal|business, --months 3 (default: last 3
+                            complete months) or --from/--to, --name "Holder", --format pdf|html|csv|json)
     payloads [list|download <id>]  Raw provider responses, exactly as received
     reports send <id>     Email a report (--to a@x,b@y, --format pdf,csv, --message, --no-attach)
     books send            Email the CPA pack (--to, --period, --scope, --format,
