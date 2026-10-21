@@ -252,3 +252,32 @@ columns on the existing three tables. Accounts are now unique on
 `(source_connection_id, external_id)`; every existing account was moved in
 place under a `legacy` source with its uuid intact. Migrations are applied
 to production through the Supabase MCP, not CI.
+
+## Profit and loss statements
+
+`GET /api/finances/pnl?scope=personal|business` (CLI: `coinpay finances pnl`)
+answers "how much did this person or business earn and spend", the question
+a benefits office, lender or landlord asks. Personal and business are always
+separate documents. With no period it covers the last three complete
+calendar months (`months=1..24`, or `from`/`to`, or `period`). `name` is the
+holder printed on it; formats are pdf (default), html, csv and json.
+
+It is built live from the books (`src/lib/finances/pnl.ts`, pure; loader in
+`pnl-data.ts`), hidden accounts included, because a re-linked bank's old
+feed holds history its new feed lacks. The rules:
+
+- Transfers pair across **every** linked account, both scopes, by exact
+  amount within four days. An amount with cents pairs on its own; a round
+  amount also needs transfer-like text on both legs. Brokerage buys and
+  retirement deposits never pair. A personal-to-business move is an owner
+  contribution on the business statement and "money put into own business"
+  on the personal one.
+- Credits on cards and loans are payments, refunds or rewards, never income.
+  A returned payment is a payment reversal, not a purchase.
+- Retirement custodians named in the bank text are tested before the
+  auto-category, which often calls them transfers.
+- **A deposit that cannot be shown to be something else counts as income**
+  and is listed row by row. Confirming it in Books (`tax_category`
+  `transfer`, `owner_draw`, ...) and regenerating moves it.
+- Bank rows are bucketed by their posted calendar day; CoinPay payments
+  received (business only, `confirmed`/`forwarded`) by local time.

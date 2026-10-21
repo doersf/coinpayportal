@@ -540,7 +540,7 @@ export interface BooksSummary {
 }
 
 /** All posted rows in [start, end) for the accounts in scope, paged fully. */
-async function rowsForPeriod(merchantId: string, start: string, end: string, scope: 'business' | 'personal' | 'all'): Promise<BookRow[]> {
+export async function rowsForPeriod(merchantId: string, start: string, end: string, scope: 'business' | 'personal' | 'all'): Promise<BookRow[]> {
   const supabase = getSupabaseAdmin();
   const accounts = await listAccounts(merchantId, { includeHidden: true });
   const byId = new Map(accounts.map((a) => [a.id, a]));

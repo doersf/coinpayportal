@@ -802,6 +802,30 @@ export async function runFinancesCommand(subcommand, args, flags, ctx) {
         throw new CliExit(EXIT.INVALID, 'Usage: coinpay finances books [queue|confirm <id>|confirm-all --yes|categorize|rules [add|delete]|summary|export|send]');
       }
 
+      case 'pnl':
+      case 'profit-loss': {
+        const scopes = listFlag(flags.scope);
+        const wanted = scopes.length ? scopes : ['personal', 'business'];
+        for (const s of wanted) if (s !== 'personal' && s !== 'business') throw new CliExit(EXIT.INVALID, `--scope must be personal, business or both (got ${s})`);
+        const format = typeof flags.format === 'string' ? flags.format.toLowerCase() : 'pdf';
+        if (!['pdf', 'html', 'csv', 'json'].includes(format)) throw new CliExit(EXIT.INVALID, '--format must be pdf, html, csv or json');
+        const months = flags.months === undefined ? undefined : Number(flags.months);
+        if (months !== undefined && (!Number.isInteger(months) || months < 1 || months > 24)) throw new CliExit(EXIT.INVALID, '--months must be 1 to 24');
+        const period = typeof flags.period === 'string' ? flags.period : undefined;
+        const from = typeof flags.from === 'string' ? flags.from : undefined;
+        const to = typeof flags.to === 'string' ? flags.to : undefined;
+        const timezone = typeof flags.timezone === 'string' ? flags.timezone : undefined;
+        const name = typeof flags.name === 'string' ? flags.name : undefined;
+        const written = [];
+        for (const scope of wanted) {
+          const file = await api.exportPnl(client, { scope, months, period, from, to, timezone, name, format });
+          const output = typeof flags.output === 'string' && wanted.length === 1 ? flags.output : file.filename || `pnl-${scope}.${format}`;
+          written.push({ scope, output: writeDownload(output, Buffer.from(file.bytes), { overwrite: flags.overwrite === true }), bytes: file.bytes.length });
+        }
+        emit({ files: written }, written.map((w) => `Wrote ${w.output} (${w.scope}, ${w.bytes} bytes)`).join('\n'));
+        return EXIT.OK;
+      }
+
       case 'digest': {
         const action = args[0] || 'show';
         const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
@@ -966,4 +990,4 @@ export async function runFinancesCommand(subcommand, args, flags, ctx) {
   }
 }
 
-export const EXTENDED_SUBCOMMANDS = ['connect', 'disconnect', 'consent', 'backfill', 'jobs', 'coverage', 'report', 'reports', 'statements', 'books', 'payloads', 'digest', 'due', 'due-soon', 'recurring', 'due-day', 'daily'];
+export const EXTENDED_SUBCOMMANDS = ['connect', 'disconnect', 'consent', 'backfill', 'jobs', 'coverage', 'report', 'reports', 'statements', 'books', 'pnl', 'profit-loss', 'payloads', 'digest', 'due', 'due-soon', 'recurring', 'due-day', 'daily'];

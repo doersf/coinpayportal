@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
@@ -221,6 +221,10 @@ describe('weekly digest, the default account report', () => {
   const weekly = () => db.tables.finance_email_schedules.filter((r) => r.kind === 'weekly_digest');
 
   it('linking a first connection turns on the weekly digest (and the daily summary) for that merchant only', async () => {
+    // ensureDefaultReports reads the clock; pin it to the Saturday asserted below.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+    onTestFinished(() => { vi.useRealTimers(); });
     db.tables.merchants.push({ id: 'merchant-new', email: 'new@example.com' });
     db.tables.finance_connections.push({ id: 'c9', merchant_id: 'merchant-new', lifecycle_state: 'active' });
     expect(await subs.ensureDefaultReports('merchant-new')).toEqual({ daily_summary: true, weekly_digest: true });
