@@ -712,7 +712,8 @@ ${colors.cyan}Commands:${colors.reset}
                             --with-documents: a ZIP with the period's tax documents, up to 8 MiB)
     pnl                   Profit and loss, personal and business as separate files
                             (--scope personal|business, --months 3 (default: last 3
-                            complete months) or --from/--to, --name "Holder", --format pdf|html|csv|json)
+                            complete months) or --from/--to, --name "Holder", --format pdf|html|csv|json,
+                            --newest-first puts the latest month first)
     payloads [list|download <id>]  Raw provider responses, exactly as received
     reports send <id>     Email a report (--to a@x,b@y, --format pdf,csv, --message, --no-attach)
     books send            Email the CPA pack (--to, --period, --scope, --format,

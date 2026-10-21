@@ -433,6 +433,8 @@ export interface BuildPnlInput {
   accounts: PnlAccount[];
   receipts?: PnlReceipt[];
   currency?: string;
+  /** Month columns newest first (a caseworker reads the current month first). */
+  newestFirst?: boolean;
   now?: Date;
 }
 
@@ -447,7 +449,8 @@ export function buildPnl(input: BuildPnlInput): PnlStatement {
   });
   const pairs = pairTransfers(all, accounts);
   const byId = new Map(all.map((r) => [r.id, r]));
-  const months = monthsBetween(input.start, input.end, input.timezone);
+  const chronological = monthsBetween(input.start, input.end, input.timezone);
+  const months = input.newestFirst ? [...chronological].reverse() : chronological;
 
   const classified: ClassifiedRow[] = [];
   for (const r of all) {

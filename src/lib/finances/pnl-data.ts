@@ -49,7 +49,7 @@ async function loadReceipts(merchantId: string, start: string, end: string): Pro
  */
 export async function loadPnl(
   merchantId: string,
-  params: { scope: PnlScope; start: string; end: string; timezone: string; holder: string },
+  params: { scope: PnlScope; start: string; end: string; timezone: string; holder: string; newestFirst?: boolean },
 ): Promise<PnlStatement> {
   const [accountViews, bookRows, receipts] = await Promise.all([
     listAccounts(merchantId, { includeHidden: true }),
