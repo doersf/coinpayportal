@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
 import { createPayment, Blockchain, resolveCheckoutWindow } from '@/lib/payments/service';
 import { resolveReturnUrl, returnUrlMetadata } from '@/lib/payments/return-url';
+import { customerMetadata } from '@/lib/checkout/customer';
 import { authenticateRequest, isMerchantAuth, isBusinessAuth, hasScope } from '@/lib/auth/middleware';
 import {
   withTransactionLimit,
@@ -450,6 +451,11 @@ export async function POST(request: NextRequest) {
     if (description) {
       paymentMetadata.description = description;
     }
+    // Who paid and for which property (optional here; required on hosted
+    // checkout sessions). Read from the top level, falling back to the same
+    // keys inside metadata; stored in metadata so every webhook carries them.
+    const customerFields = customerMetadata({ ...paymentMetadata, ...body });
+    if (customerFields.ok) Object.assign(paymentMetadata, customerFields.metadata);
     // Where the customer goes afterwards, Stripe-style: success_url (or the
     // older redirect_url) after a completed payment, cancel_url back to the
     // shop from an expired or abandoned checkout. The card rail hands the same

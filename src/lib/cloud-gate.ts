@@ -161,9 +161,10 @@ const MACHINE_PATHS = /^\/(?:install\.sh$|\.well-known\/)/;
  * corporate VPN or a cloud desktop sits in a datacenter range like any
  * scraper, and asking them to pay a toll before they can pay an invoice is a
  * lost payment, not a blocked crawler. The same goes for a contractor opening
- * their portal to get paid.
+ * their portal to get paid. Hosted checkout (/checkout/cs_...) and the pay
+ * pages it hands off to (/pay/<id>, /pay/paypal/...) are the same case.
  */
-const PAYER_PATHS = /^\/(?:contractor\/[^/]+(?:\/invoices\/[^/]+)?\/?$|invoices\/[^/]+\/pay\/?$|now\/[^/]+\/?$|portal\/[^/]+\/?$|proposals\/respond\/[^/]+\/?$|sign\/[^/]+\/?$)/;
+const PAYER_PATHS = /^\/(?:contractor\/[^/]+(?:\/invoices\/[^/]+)?\/?$|invoices\/[^/]+\/pay\/?$|now\/[^/]+\/?$|portal\/[^/]+\/?$|proposals\/respond\/[^/]+\/?$|sign\/[^/]+\/?$|checkout\/cs_[A-Za-z0-9]+\/?$|pay\/[^/]+\/?$|pay\/paypal\/[^/]+\/?$)/;
 
 /** The forwarded client address, or null when there is none to judge. */
 export function clientAddress(request: Request): string | null {

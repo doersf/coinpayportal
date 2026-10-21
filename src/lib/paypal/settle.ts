@@ -31,6 +31,7 @@ export interface PaypalTransactionRow {
   customer_email: string | null;
   platform_fee_amount: number | string | null;
   paypal_order_id: string;
+  metadata?: Record<string, unknown> | null;
 }
 
 /**
@@ -126,6 +127,9 @@ export async function settlePaypalCapture(
         invoice_number: transaction.invoice_number,
         platform_fee_amount: platformFee,
         net_to_merchant: netToMerchant,
+        // Merchant metadata plus who paid / which property / checkout session.
+        // Undefined lets the webhook sender read it off the row.
+        metadata: transaction.metadata ?? undefined,
       });
     } catch (err) {
       console.error('[PayPal] Merchant webhook dispatch failed:', err);
@@ -154,7 +158,7 @@ export async function findPaypalTransaction(
       .from('paypal_transactions')
       .select(
         `id, business_id, merchant_id, amount, currency, status, invoice_number,
-         customer_email, platform_fee_amount, paypal_order_id`
+         customer_email, platform_fee_amount, paypal_order_id, metadata`
       )
       .eq('id', customId)
       .maybeSingle();
@@ -166,7 +170,7 @@ export async function findPaypalTransaction(
       .from('paypal_transactions')
       .select(
         `id, business_id, merchant_id, amount, currency, status, invoice_number,
-         customer_email, platform_fee_amount, paypal_order_id`
+         customer_email, platform_fee_amount, paypal_order_id, metadata`
       )
       .eq('paypal_order_id', orderId)
       .maybeSingle();

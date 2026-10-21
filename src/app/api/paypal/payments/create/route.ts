@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { createPaypalOrder } from '@/lib/paypal/client';
-import { resolvePaypalContext } from '@/lib/paypal/accounts';
-import { screenCheckout } from '@/lib/fraud/screen';
 import { authorizePaymentCreation } from '@/lib/auth/payment-auth';
 import { getClientIp } from '@/lib/web-wallet/client-ip';
-import { isBusinessPaidTier } from '@/lib/entitlements/service';
-import { getFeePercentage } from '@/lib/payments/fees';
+import { createPaypalPaymentForBusiness } from '@/lib/paypal/create-payment';
+import { customerMetadata } from '@/lib/checkout/customer';
 
 function getSupabase() {
   return createClient(
@@ -115,69 +112,6 @@ export async function POST(request: NextRequest) {
         ? (customerName ?? customer_name).trim()
         : null;
 
-    const { data: business, error: bizError } = await supabase
-      .from('businesses')
-      .select('merchant_id, name')
-      .eq('id', businessId)
-      .single();
-
-    if (bizError || !business) {
-      console.error('[PayPal] Business lookup failed:', bizError);
-      return NextResponse.json({ error: 'Business not found' }, { status: 404 });
-    }
-
-    const context = await resolvePaypalContext(supabase, businessId);
-    if ('error' in context) {
-      return NextResponse.json({ error: context.error }, { status: context.status });
-    }
-
-    // Screen before the order exists — the last point at which we can stop a
-    // payment without PayPal ever seeing it.
-    const screening = await screenCheckout(supabase, {
-      businessId,
-      email: customerEmailValue,
-      ip: getClientIp(request),
-      amount,
-      currency,
-      description,
-    });
-
-    if (screening.decision === 'block') {
-      console.warn('[Fraud] Blocked PayPal checkout', {
-        businessId,
-        score: screening.score,
-        findings: screening.findings.map((f) => f.code).join(', '),
-      });
-      return NextResponse.json({ error: screening.buyerMessage }, { status: 403 });
-    }
-
-    // The Stripe rail answers elevated risk by forcing 3-D Secure. PayPal has no
-    // equivalent lever we can pull per-order — liability sits with PayPal's own
-    // Seller Protection — so an elevated score is recorded and allowed through
-    // rather than silently treated as if it had been stepped up.
-    if (screening.decision === 'verify') {
-      console.warn('[Fraud] Elevated-risk PayPal checkout allowed (no 3DS equivalent)', {
-        businessId,
-        score: screening.score,
-        findings: screening.findings.map((f) => f.code).join(', '),
-      });
-    }
-
-    // Platform fee at the merchant's real tier. isBusinessPaidTier is the single
-    // source of truth and already enforces subscription expiry — do not
-    // hardcode a rate here, that is what caused the 50% shortfall on the Stripe
-    // rail before it was fixed.
-    const isPaidTier = await isBusinessPaidTier(supabase, businessId);
-    const platformFeeRate = getFeePercentage(isPaidTier);
-    const platformFeeAmount = context.supportsPlatformFee
-      ? Math.round(amount * platformFeeRate * 100) / 100
-      : 0;
-
-    const invoiceNumber =
-      (typeof callerInvoiceNumber === 'string' && callerInvoiceNumber.trim()) ||
-      `INV-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://coinpayportal.com';
     const merchantSuccessUrl =
       typeof (successUrl ?? success_url) === 'string' && (successUrl ?? success_url)
         ? String(successUrl ?? success_url)
@@ -187,118 +121,34 @@ export async function POST(request: NextRequest) {
         ? String(cancelUrl ?? cancel_url)
         : null;
 
-    // The row is written BEFORE the order so its id can travel to PayPal as
-    // custom_id. That id is what the webhook uses to find this row without
-    // trusting anything the payer's browser sends back.
-    const { data: inserted, error: insertError } = await supabase
-      .from('paypal_transactions')
-      .insert({
-        merchant_id: business.merchant_id,
-        business_id: businessId,
-        // Placeholder: replaced with the real order id immediately below. The
-        // column is NOT NULL UNIQUE, so it needs a unique value now.
-        paypal_order_id: `pending:${invoiceNumber}`,
-        connection_mode: context.mode,
-        amount,
-        currency: String(currency).toUpperCase(),
-        platform_fee_amount: platformFeeAmount,
-        status: 'pending',
-        invoice_number: invoiceNumber,
-        description: typeof description === 'string' ? description.slice(0, 500) : null,
-        customer_email: customerEmailValue,
-        customer_name: customerNameValue,
-        payee_merchant_id: context.payeeMerchantId,
-        metadata: {
-          ...(metadata && typeof metadata === 'object' ? metadata : {}),
-          business_id: businessId,
-          merchant_id: business.merchant_id,
-          fraud_score: screening.score,
-          fraud_decision: screening.decision,
-          // Where the hosted button page sends the payer after capture/cancel.
-          ...(merchantSuccessUrl ? { paypal_success_url: merchantSuccessUrl } : {}),
-          ...(merchantCancelUrl ? { paypal_cancel_url: merchantCancelUrl } : {}),
-        },
-      })
-      .select('id')
-      .single();
-
-    if (insertError || !inserted) {
-      console.error('[PayPal] transaction insert error:', insertError);
-      return NextResponse.json({ error: 'Failed to record payment' }, { status: 500 });
+    // Who paid and for which property, Stripe-style. Optional here, and kept
+    // in the row's metadata so the merchant webhook carries them.
+    const customerFields = customerMetadata(body);
+    if (!customerFields.ok) {
+      return NextResponse.json({ error: customerFields.error }, { status: 400 });
     }
 
-    let order;
-    try {
-      order = await createPaypalOrder({
-        ...context.creds,
-        ...context.callContext,
-        // Idempotency: a retried create with the same row never opens a second
-        // order on the merchant's account.
-        requestId: inserted.id,
-        amount,
-        currency,
-        referenceId: invoiceNumber,
-        description: description || `Payment to ${business.name || 'merchant'}`,
-        brandName: business.name || 'CoinPay',
-        customId: inserted.id,
-        invoiceId: invoiceNumber,
-        payerEmail: customerEmailValue,
-        returnUrl: merchantSuccessUrl || `${appUrl}/pay/paypal/return?transaction_id=${inserted.id}`,
-        cancelUrl:
-          merchantCancelUrl || `${appUrl}/pay/paypal/return?cancelled=1&transaction_id=${inserted.id}`,
-        payeeMerchantId: context.payeeMerchantId,
-        platformFee: platformFeeAmount > 0 ? platformFeeAmount : null,
-        platformFeePayeeMerchantId: context.platformFeePayeeMerchantId,
-      });
-    } catch (err) {
-      // Mark the placeholder failed rather than leaving a permanently pending
-      // row that no webhook will ever resolve.
-      await supabase
-        .from('paypal_transactions')
-        .update({
-          status: 'failed',
-          failure_reason: err instanceof Error ? err.message.slice(0, 500) : 'PayPal order creation failed',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', inserted.id);
-
-      console.error('[PayPal] Order creation failed:', err);
-      return NextResponse.json(
-        { error: err instanceof Error ? err.message : 'Failed to create PayPal order' },
-        { status: 502 }
-      );
-    }
-
-    const { error: bindError } = await supabase
-      .from('paypal_transactions')
-      .update({ paypal_order_id: order.orderId, updated_at: new Date().toISOString() })
-      .eq('id', inserted.id);
-
-    if (bindError) {
-      // The order exists at PayPal but we could not bind it. Capture would then
-      // have no row to settle, so refuse the checkout rather than hand the payer
-      // a URL that pays into a void.
-      console.error('[PayPal] Failed to bind order id to transaction:', bindError);
-      return NextResponse.json({ error: 'Failed to record PayPal order' }, { status: 500 });
-    }
-
-    return NextResponse.json({
-      invoice_number: invoiceNumber,
-      transaction_id: inserted.id,
-      order_id: order.orderId,
-      // PayPal's redirect checkout, unchanged.
-      approve_url: order.approveUrl,
-      // CoinPay's hosted page with PayPal's JS SDK buttons (falls back to the
-      // redirect when the SDK can't load). `checkout_url` points here so an
-      // integration written against the Stripe rail reads the same field name.
-      hosted_checkout_url: `${appUrl}/pay/paypal/${inserted.id}`,
-      checkout_url: `${appUrl}/pay/paypal/${inserted.id}`,
+    const result = await createPaypalPaymentForBusiness(supabase, {
+      businessId,
       amount,
-      currency: String(currency).toUpperCase(),
-      platform_fee_amount: platformFeeAmount,
-      platform_fee_supported: context.supportsPlatformFee,
-      connection_mode: context.mode,
+      currency,
+      description,
+      metadata: {
+        ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}),
+        ...customerFields.metadata,
+      },
+      successUrl: merchantSuccessUrl,
+      cancelUrl: merchantCancelUrl,
+      customerEmail: customerEmailValue ?? customerFields.metadata.customer_email ?? null,
+      customerName: customerNameValue,
+      invoiceNumber: callerInvoiceNumber,
+      clientIp: getClientIp(request),
     });
+
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+    return NextResponse.json(result.response);
   } catch (error: any) {
     console.error('PayPal payment creation error:', error);
     return NextResponse.json(

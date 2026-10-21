@@ -684,7 +684,8 @@ describe('PaymentDetailPage', () => {
       // Wait a bit and verify no additional fetches
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      expect(fetch).toHaveBeenCalledTimes(1);
+      // The merchant-only payer lookup (/customer) is not a poll.
+      expect(vi.mocked(fetch).mock.calls.filter(([u]) => !String(u).endsWith("/customer"))).toHaveLength(1);
     });
 
     it('should continue polling for confirmed payment without tx_hash', async () => {
@@ -732,7 +733,8 @@ describe('PaymentDetailPage', () => {
       // Wait a bit and verify no additional fetches
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      expect(fetch).toHaveBeenCalledTimes(1);
+      // The merchant-only payer lookup (/customer) is not a poll.
+      expect(vi.mocked(fetch).mock.calls.filter(([u]) => !String(u).endsWith("/customer"))).toHaveLength(1);
     });
 
     it('should not poll for failed payment', async () => {
@@ -753,7 +755,8 @@ describe('PaymentDetailPage', () => {
       // Wait a bit and verify no additional fetches
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      expect(fetch).toHaveBeenCalledTimes(1);
+      // The merchant-only payer lookup (/customer) is not a poll.
+      expect(vi.mocked(fetch).mock.calls.filter(([u]) => !String(u).endsWith("/customer"))).toHaveLength(1);
     });
 
     it('should not poll for forwarded payment with tx_hash', async () => {
@@ -774,7 +777,8 @@ describe('PaymentDetailPage', () => {
       // Wait a bit and verify no additional fetches
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      expect(fetch).toHaveBeenCalledTimes(1);
+      // The merchant-only payer lookup (/customer) is not a poll.
+      expect(vi.mocked(fetch).mock.calls.filter(([u]) => !String(u).endsWith("/customer"))).toHaveLength(1);
     });
   });
 

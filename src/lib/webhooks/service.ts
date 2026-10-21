@@ -4,6 +4,8 @@ import { resolveWebhookSecret } from './secret';
 import { safeFetch, isBlockedAddress } from '@/lib/security/ssrf';
 import { isIP } from 'net';
 import { enqueueFailedDelivery } from './retry-queue';
+import { webhookCustomerFields } from '@/lib/checkout/customer';
+import { markCheckoutSessionPaidFromWebhook } from '@/lib/checkout/settle';
 
 /**
  * Synchronous SSRF pre-check on a webhook URL.
@@ -503,6 +505,25 @@ export async function getWebhookLogs(
   }
 }
 
+/** Metadata of a crypto payment or, failing that, a PayPal transaction. */
+async function loadPaymentMetadata(
+  supabase: SupabaseClient,
+  paymentId: string
+): Promise<Record<string, unknown> | undefined> {
+  try {
+    const { data } = await supabase.from('payments').select('metadata').eq('id', paymentId).maybeSingle();
+    if (data?.metadata) return data.metadata as Record<string, unknown>;
+    const { data: pp } = await supabase
+      .from('paypal_transactions')
+      .select('metadata')
+      .eq('id', paymentId)
+      .maybeSingle();
+    return (pp?.metadata as Record<string, unknown> | undefined) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Send webhook for payment event
  *
@@ -520,6 +541,25 @@ export async function sendPaymentWebhook(
   paymentData: any
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    // Payment events carry the payment's metadata (who paid, which property,
+    // which checkout session). Several confirm paths do not pass it, so read
+    // it off the row once here rather than at every call site.
+    if (event.startsWith('payment.') && paymentData && paymentData.metadata === undefined) {
+      paymentData = { ...paymentData, metadata: await loadPaymentMetadata(supabase, paymentId) };
+    }
+
+    // A paid payment settles its hosted checkout session, whether or not the
+    // business has a webhook configured.
+    if ((event === 'payment.confirmed' || event === 'payment.forwarded') && paymentData?.metadata?.checkout_session_id) {
+      await markCheckoutSessionPaidFromWebhook(supabase, {
+        sessionId: String(paymentData.metadata.checkout_session_id),
+        paymentId,
+        method: paymentData.payment_method === 'paypal' || paymentData.rail === 'paypal'
+          ? 'PAYPAL'
+          : (paymentData.blockchain || paymentData.currency || null),
+      }).catch((e) => console.error('[Webhook] checkout session settle failed:', e));
+    }
+
     // Get business webhook configuration. We need merchant_id because
     // webhook_secret is encrypted at rest with a per-merchant *derived* key
     // (deriveKey(ENCRYPTION_KEY, merchant_id)) by lib/business/service.ts.
@@ -585,6 +625,9 @@ export async function sendPaymentWebhook(
         ...(paymentData.confirmed_at && { confirmed_at: paymentData.confirmed_at }),
         // Include metadata if present (merchant's custom data passed during payment creation)
         ...(paymentData.metadata && { metadata: paymentData.metadata }),
+        // Who paid and for which property, plus the hosted checkout session id,
+        // lifted out of metadata so a consumer need not dig. Additive only.
+        ...webhookCustomerFields(paymentData.metadata),
       },
       created_at: now.toISOString(),
       business_id: businessId,

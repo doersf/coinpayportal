@@ -78,6 +78,28 @@ export default function PaymentDetailPage() {
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const balanceCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastBalanceCheckRef = useRef<number>(0);
+  // Who paid and for which property (merchant-only, so a separate authed call).
+  const [customer, setCustomer] = useState<{
+    customer_email: string | null;
+    account_id: string | null;
+    property: string | null;
+    checkout_session_id: string | null;
+  } | null>(null);
+
+  // Runs once the payment itself has loaded, so it never races the main fetch.
+  const loadedPaymentId = payment?.id;
+  useEffect(() => {
+    if (!loadedPaymentId) return;
+    let cancelled = false;
+    authFetch(`/api/payments/${loadedPaymentId}/customer`, {})
+      .then((result) => {
+        if (!cancelled && result?.response.ok && result.data?.success) setCustomer(result.data.customer);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [loadedPaymentId]);
 
   const copyToClipboard = async (text: string, field: string) => {
     try {
@@ -652,6 +674,32 @@ export default function PaymentDetailPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                     </svg>
                   </a>
+                </div>
+              )}
+              {customer?.account_id && (
+                <div className="flex justify-between text-sm" data-testid="payer-account">
+                  <span className="text-gray-600">Account:</span>
+                  <span className="text-gray-900 font-mono">{customer.account_id}</span>
+                </div>
+              )}
+              {customer?.customer_email && (
+                <div className="flex justify-between text-sm" data-testid="payer-email">
+                  <span className="text-gray-600">Email:</span>
+                  <a href={`mailto:${customer.customer_email}`} className="text-purple-600 hover:underline">
+                    {customer.customer_email}
+                  </a>
+                </div>
+              )}
+              {customer?.property && (
+                <div className="flex justify-between text-sm" data-testid="payer-property">
+                  <span className="text-gray-600">Property:</span>
+                  <span className="text-gray-900">{customer.property}</span>
+                </div>
+              )}
+              {customer?.checkout_session_id && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Checkout session:</span>
+                  <span className="text-gray-900 font-mono">{customer.checkout_session_id}</span>
                 </div>
               )}
               {payment.description && (

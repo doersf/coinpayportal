@@ -8,6 +8,7 @@ import { ReputationDocs } from '@/components/docs/ReputationDocs';
 import { DocSection } from '@/components/docs/DocSection';
 import { ApiEndpoint } from '@/components/docs/ApiEndpoint';
 import { CodeBlock } from '@/components/docs/CodeBlock';
+import { CheckoutSessionsDocs } from '@/components/docs/CheckoutSessionsDocs';
 
 export default function DocsPage() {
   return (
@@ -278,6 +279,7 @@ export default function DocsPage() {
               { name: 'Subscriptions & Entitlements', href: '#subscriptions' },
               { name: 'Businesses', href: '#businesses' },
               { name: 'Supported Coins', href: '#supported-coins' },
+              { name: 'Hosted Checkout Sessions', href: '#checkout-sessions' },
               { name: 'Payments', href: '#payments' },
               { name: 'Unified Payments (Crypto + Card)', href: '#unified-payments' },
               { name: 'Business Collection', href: '#business-collection' },
@@ -1380,6 +1382,10 @@ data.coins.filter(c => c.is_active).forEach(coin => {
         </div>
 
         {/* Payments */}
+        <div id="checkout-sessions">
+          <CheckoutSessionsDocs />
+        </div>
+
         <div id="payments">
           <DocSection title="Payments">
             <ApiEndpoint method="POST" path="/api/payments/create" description="Create a new payment request.">

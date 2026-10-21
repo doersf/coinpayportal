@@ -32,6 +32,7 @@ interface Payment {
     description?: string;
     redirect_url?: string;
     cancel_url?: string;
+    checkout_url?: string;
     stripe_checkout_url?: string;
     stripe_session_id?: string;
     payment_method?: string;
@@ -490,6 +491,17 @@ export default function PublicPaymentPage() {
           </Link>
           {merchantName && (
             <p className="text-gray-400 text-sm">Payment to {merchantName}</p>
+          )}
+          {/* Came from a hosted checkout: let the buyer go back and pick another coin or PayPal. */}
+          {(paymentStatus === 'pending' || paymentStatus === 'expired') &&
+            /^\/checkout\/cs_[A-Za-z0-9]{16,64}$/.test(payment.metadata?.checkout_url || '') && (
+            <Link
+              href={payment.metadata!.checkout_url!}
+              className="mt-2 inline-block text-sm text-purple-300 hover:text-purple-200 underline"
+              data-testid="switch-payment-method"
+            >
+              Choose a different payment method
+            </Link>
           )}
         </div>
 

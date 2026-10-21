@@ -218,6 +218,8 @@ export interface PublicPaymentMetadata {
   stripe_checkout_url?: string;
   redirect_url?: string;
   cancel_url?: string;
+  /** The hosted checkout session this payment came from, so the buyer can switch method. */
+  checkout_url?: string;
 }
 
 export { safeReturnUrl };
@@ -657,6 +659,11 @@ export async function getPaymentPublic(
     if (redirectUrl) publicMetadata.redirect_url = redirectUrl;
     const cancelUrl = safeReturnUrl(metadata?.cancel_url);
     if (cancelUrl) publicMetadata.cancel_url = cancelUrl;
+    // Only our own hosted checkout page, never a caller-supplied URL.
+    const sessionId = metadata?.checkout_session_id;
+    if (typeof sessionId === 'string' && /^cs_[A-Za-z0-9]{16,64}$/.test(sessionId)) {
+      publicMetadata.checkout_url = `/checkout/${sessionId}`;
+    }
 
     const business = Array.isArray(businesses) ? businesses[0] : businesses;
     const merchantName =

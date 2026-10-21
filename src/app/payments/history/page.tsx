@@ -39,6 +39,25 @@ interface CryptoPayment {
   confirmations: number;
   created_at: string;
   expires_at: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+/** Who paid and for which property, when the integration sent it. */
+function PayerCell({ metadata }: { metadata?: Record<string, unknown> | null }) {
+  const str = (k: string) => (typeof metadata?.[k] === 'string' ? (metadata[k] as string) : null);
+  const email = str('customer_email');
+  const account = str('account_id');
+  const property = str('property');
+  if (!email && !account && !property) return <span className="text-gray-400">-</span>;
+  return (
+    <div className="text-xs leading-5" data-testid="payer-cell">
+      {account && <div className="font-medium text-gray-900 dark:text-gray-100">{account}</div>}
+      {email && (
+        <a href={`mailto:${email}`} className="text-purple-600 hover:underline break-all">{email}</a>
+      )}
+      {property && <div className="text-gray-500">{property}</div>}
+    </div>
+  );
 }
 
 interface CardTransaction {
@@ -187,6 +206,9 @@ export default function PaymentHistoryPage() {
         created_at: p.created_at,
         payment_address: p.payment_address,
         tx_hash: p.tx_hash || '',
+        customer_email: (p.metadata?.customer_email as string) || '',
+        account_id: (p.metadata?.account_id as string) || '',
+        property: (p.metadata?.property as string) || '',
       }));
       const cardData = cardTransactions.map(t => ({
         type: 'card',
@@ -308,6 +330,8 @@ export default function PaymentHistoryPage() {
     const filteredPayments = searchQuery 
       ? allPayments.filter(payment => 
           payment.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (payment.type === 'crypto' && ['customer_email', 'account_id', 'property'].some((k) =>
+            String((payment as any).metadata?.[k] ?? '').toLowerCase().includes(searchQuery.toLowerCase()))) ||
           (payment.type === 'crypto' && (payment as any).payment_address?.toLowerCase().includes(searchQuery.toLowerCase())) ||
           (payment.type === 'crypto' && (payment as any).tx_hash?.toLowerCase().includes(searchQuery.toLowerCase())) ||
           (payment.type === 'card' && (payment as any).stripe_charge_id?.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -375,7 +399,9 @@ export default function PaymentHistoryPage() {
                 </td>
                 <td className="px-4 py-4 text-sm text-gray-500 dark:text-gray-300">
                   {payment.type === 'crypto' ? (
-                    payment.payment_address ? `${payment.payment_address.slice(0, 10)}...` : 'N/A'
+                    payment.metadata?.account_id || payment.metadata?.customer_email ? (
+                      <PayerCell metadata={payment.metadata} />
+                    ) : payment.payment_address ? `${payment.payment_address.slice(0, 10)}...` : 'N/A'
                   ) : (
                     payment.business_name || 'N/A'
                   )}
@@ -424,6 +450,7 @@ export default function PaymentHistoryPage() {
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Payment ID</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Amount</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Chain</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Payer</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Address</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">TX Hash</th>
@@ -450,6 +477,9 @@ export default function PaymentHistoryPage() {
                 </td>
                 <td className="px-4 py-4 text-sm text-gray-500 dark:text-gray-300">
                   {payment.currency?.toUpperCase()}
+                </td>
+                <td className="px-4 py-4 text-sm text-gray-500 dark:text-gray-300">
+                  <PayerCell metadata={payment.metadata} />
                 </td>
                 <td className="px-4 py-4 whitespace-nowrap">
                   <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(payment.status)}`}>
