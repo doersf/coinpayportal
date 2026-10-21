@@ -139,6 +139,14 @@ describe('buildPnl', () => {
   });
 });
 
+describe('newest first', () => {
+  it('puts the latest month first in every table', () => {
+    const s = buildPnl({ scope: 'personal', holder: 'Pat', start: START, end: END, timezone: TZ, rows: [], accounts: ACCOUNTS, newestFirst: true });
+    expect(s.months.map((m) => m.key)).toEqual(['2026-09', '2026-08', '2026-07']);
+    expect(renderPnlCsv(s).split('\r\n')[1]).toBe('section,line,2026-09,2026-08,2026-07,total,rows');
+  });
+});
+
 describe('periods', () => {
   it('picks the last complete calendar months in the timezone', () => {
     expect(lastCompleteMonths(3, new Date('2026-10-21T12:00:00Z'), TZ)).toEqual({ from: '2026-07-01', to: '2026-10-01' });

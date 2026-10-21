@@ -17,7 +17,8 @@ export const maxDuration = 120;
  * A profit and loss statement over the linked accounts of one scope. With
  * no period it covers the last `months` complete calendar months (default
  * 3, at most 24); `from`/`to` or `period` (as on /books/export) override.
- * `name` is the holder printed on the statement.
+ * `name` is the holder printed on the statement; `order=newest` puts the
+ * latest month first.
  */
 export async function GET(req: NextRequest) {
   const guard = await requireFinanceAccess(req, 'finance.read');
@@ -34,6 +35,9 @@ export async function GET(req: NextRequest) {
   const monthsParam = q.get('months');
   const months = monthsParam === null ? 3 : Number.parseInt(monthsParam, 10);
   if (!Number.isInteger(months) || months < 1 || months > 24) return financeError('invalid_request', 'months must be 1 to 24', 400);
+  const orderParam = q.get('order');
+  if (orderParam !== null && orderParam !== 'newest' && orderParam !== 'oldest') return financeError('invalid_request', 'order must be newest or oldest', 400);
+  const newestFirst = orderParam === 'newest';
   const holder = (q.get('name') ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 120) || 'Account holder';
 
   try {
@@ -51,7 +55,7 @@ export async function GET(req: NextRequest) {
     }
     if (!period && !from && !to) ({ from, to } = lastCompleteMonths(months, new Date(), timezone));
     const bounded = boundPeriod(resolvePeriod({ period, from, to, timezone }), new Date());
-    const statement = await loadPnl(guard.id, { scope, start: bounded.start, end: bounded.effectiveEnd, timezone, holder });
+    const statement = await loadPnl(guard.id, { scope, start: bounded.start, end: bounded.effectiveEnd, timezone, holder, newestFirst });
     const fileLabel = `${bounded.start.slice(0, 10)}_${bounded.effectiveEnd.slice(0, 10)}`;
 
     let bytes: Buffer;

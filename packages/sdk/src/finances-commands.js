@@ -816,9 +816,10 @@ export async function runFinancesCommand(subcommand, args, flags, ctx) {
         const to = typeof flags.to === 'string' ? flags.to : undefined;
         const timezone = typeof flags.timezone === 'string' ? flags.timezone : undefined;
         const name = typeof flags.name === 'string' ? flags.name : undefined;
+        const order = flags['newest-first'] === true ? 'newest' : typeof flags.order === 'string' ? flags.order : undefined;
         const written = [];
         for (const scope of wanted) {
-          const file = await api.exportPnl(client, { scope, months, period, from, to, timezone, name, format });
+          const file = await api.exportPnl(client, { scope, months, period, from, to, timezone, name, format, order });
           const output = typeof flags.output === 'string' && wanted.length === 1 ? flags.output : file.filename || `pnl-${scope}.${format}`;
           written.push({ scope, output: writeDownload(output, Buffer.from(file.bytes), { overwrite: flags.overwrite === true }), bytes: file.bytes.length });
         }

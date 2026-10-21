@@ -403,8 +403,8 @@ export async function exportBooks(client, { period, from, to, timezone, scope, f
  * Profit and loss statement for one scope. With no period it covers the
  * last `months` complete calendar months (server default 3).
  */
-export async function exportPnl(client, { scope, months, period, from, to, timezone, name, format = 'pdf' } = {}) {
-  return client.requestBinary(`/finances/pnl${query({ scope, months, period, from, to, timezone, name, format })}`);
+export async function exportPnl(client, { scope, months, period, from, to, timezone, name, format = 'pdf', order } = {}) {
+  return client.requestBinary(`/finances/pnl${query({ scope, months, period, from, to, timezone, name, format, order })}`);
 }
 
 // ── Raw provider payloads ──
