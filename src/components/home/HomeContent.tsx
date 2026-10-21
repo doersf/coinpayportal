@@ -5,6 +5,8 @@ import { PaymentDemo } from '@/components/demo/PaymentDemo';
 import { Partners } from '@/components/Partners';
 import { SUPPORTED_CHAINS, STABLECOIN_RAILS } from '@/lib/wallets/supported-chains';
 import { HeroStats } from '@/components/HeroStats';
+import { LogoCarousel } from '@/components/home/LogoCarousel';
+import { AI_CLIENTS, FLEET_SITES } from '@/lib/partners/logos';
 
 const GITHUB_REPO_URL = 'https://github.com/profullstack/coinpayportal';
 
@@ -173,6 +175,26 @@ export function HomeContent() {
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Logo strip, just below the fold. The two rows say different things —
+          tools CoinPay works with, and sites that take payment through it —
+          so neither is labelled "partners". Lists in lib/partners/logos.ts. */}
+      <section className="relative py-12 bg-slate-900/40 border-y border-white/5">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
+          <div>
+            <p className="text-center text-xs uppercase tracking-widest text-gray-500 mb-5">
+              Works with the AI agents you already use
+            </p>
+            <LogoCarousel items={AI_CLIENTS} label="AI agents CoinPay works with" mono />
+          </div>
+          <div>
+            <p className="text-center text-xs uppercase tracking-widest text-gray-500 mb-5">
+              Taking payments with CoinPay on {FLEET_SITES.length} live sites
+            </p>
+            <LogoCarousel items={FLEET_SITES} label="Sites that take payment with CoinPay" reverse />
           </div>
         </div>
       </section>
