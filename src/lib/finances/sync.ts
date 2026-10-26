@@ -21,7 +21,7 @@ import { inferAccountKind, categorizeTransaction } from './classify';
 import { parseExactAmount, normalizeCurrency, type ExactAmount } from './decimal';
 import { checkRequestBudget, recordRequestUsage, BudgetExhaustedError, type RequestClass } from './budget';
 import { putObject } from './files';
-import { listRules, suggestFor, AUTO_ACCEPT_CONFIDENCE, type CategoryRule } from './books';
+import { listRules, suggestFor, acceptSuggestions, getAutoAccept, AUTO_ACCEPT_CONFIDENCE, type CategoryRule } from './books';
 import { inferAccountScope } from './position';
 
 /**
@@ -932,6 +932,16 @@ export async function ingestAccountSet(options: IngestOptions): Promise<SyncResu
         .in('external_id', chunk)
         .eq('pending', true);
       if (error) throw new Error(`Could not clear superseded transactions: ${error.message}`);
+    }
+  }
+
+  // Auto-accept (on by default): new rows arrive already reviewed with their
+  // suggestion. Best effort; the books page can always approve them later.
+  if (transactionsNew > 0) {
+    try {
+      if (await getAutoAccept(merchantId)) await acceptSuggestions(merchantId, {}, { categorizedOnly: true, by: 'auto_accept' });
+    } catch (err) {
+      console.error('[finances/sync] auto-accept skipped', err instanceof Error ? err.message : err);
     }
   }
 
