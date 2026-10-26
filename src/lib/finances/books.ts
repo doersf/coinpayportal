@@ -236,6 +236,24 @@ function decorate(row: Record<string, unknown>, accounts: Map<string, AccountVie
   };
 }
 
+export const QUEUE_SORTS = ['posted', 'payee', 'account', 'amount', 'category', 'tax_category', 'confidence'] as const;
+export type QueueSort = (typeof QUEUE_SORTS)[number];
+
+export function isQueueSort(value: unknown): value is QueueSort {
+  return typeof value === 'string' && (QUEUE_SORTS as readonly string[]).includes(value);
+}
+
+/** The column a sort key orders by; `account` groups rows by account. */
+const SORT_COLUMN: Record<QueueSort, string> = {
+  posted: 'posted',
+  payee: 'payee',
+  account: 'account_id',
+  amount: 'amount',
+  category: 'category',
+  tax_category: 'tax_category',
+  confidence: 'category_confidence',
+};
+
 export interface QueueFilters {
   status?: 'unreviewed' | 'reviewed' | 'all';
   accountId?: string | null;
@@ -243,37 +261,52 @@ export interface QueueFilters {
   start?: string | null;
   end?: string | null;
   search?: string | null;
+  sort?: QueueSort;
+  dir?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
+}
+
+/** The accounts a queue filter covers. Account-level scope narrows; per-row overrides are not applied. */
+function queueAccountIds(accounts: AccountView[], filters: QueueFilters): string[] {
+  let ids = accounts.map((a) => a.id);
+  if (filters.accountId) ids = ids.filter((id) => id === filters.accountId);
+  if (filters.scope && filters.scope !== 'all') {
+    ids = accounts.filter((a) => ids.includes(a.id) && a.effective_scope === filters.scope).map((a) => a.id);
+  }
+  return ids;
+}
+
+function applyQueueFilters<Q extends { is: any; not: any; gte: any; lt: any; or: any }>(query: Q, filters: QueueFilters): Q {
+  let q = query;
+  if ((filters.status ?? 'unreviewed') === 'unreviewed') q = q.is('reviewed_at', null);
+  else if (filters.status === 'reviewed') q = q.not('reviewed_at', 'is', null);
+  if (filters.start) q = q.gte('posted', filters.start);
+  if (filters.end) q = q.lt('posted', filters.end);
+  const search = filters.search?.trim().replace(/[,()*]/g, ' ').trim();
+  if (search) q = q.or(`description.ilike.%${search}%,payee.ilike.%${search}%,memo.ilike.%${search}%`);
+  return q;
 }
 
 export async function listQueue(merchantId: string, filters: QueueFilters = {}): Promise<{ rows: BookRow[]; total: number; unreviewed: number }> {
   const supabase = getSupabaseAdmin();
   const accounts = await listAccounts(merchantId, { includeHidden: true });
   const byId = new Map(accounts.map((a) => [a.id, a]));
-  let ids = accounts.map((a) => a.id);
-  if (filters.accountId) ids = ids.filter((id) => id === filters.accountId);
-  if (filters.scope && filters.scope !== 'all') {
-    // Account-level scope narrows the query; per-row overrides are applied after.
-    ids = accounts.filter((a) => ids.includes(a.id) && a.effective_scope === filters.scope).map((a) => a.id);
-  }
+  const ids = queueAccountIds(accounts, filters);
   if (ids.length === 0) return { rows: [], total: 0, unreviewed: 0 };
 
   const limit = Math.min(Math.max(filters.limit ?? 50, 1), 500);
   const offset = Math.max(filters.offset ?? 0, 0);
+  const sort = filters.sort ?? 'posted';
+  const ascending = filters.dir === 'asc';
   let query = supabase
     .from('finance_transactions')
     .select(TX_COLUMNS, { count: 'exact' })
     .in('account_id', ids)
     .eq('pending', false)
-    .order('posted', { ascending: false })
-    .order('id', { ascending: false });
-  if ((filters.status ?? 'unreviewed') === 'unreviewed') query = query.is('reviewed_at', null);
-  else if (filters.status === 'reviewed') query = query.not('reviewed_at', 'is', null);
-  if (filters.start) query = query.gte('posted', filters.start);
-  if (filters.end) query = query.lt('posted', filters.end);
-  const search = filters.search?.trim().replace(/[,()*]/g, ' ').trim();
-  if (search) query = query.or(`description.ilike.%${search}%,payee.ilike.%${search}%,memo.ilike.%${search}%`);
+    .order(SORT_COLUMN[sort], { ascending, nullsFirst: false });
+  if (sort !== 'posted') query = query.order('posted', { ascending: false });
+  query = applyQueueFilters(query.order('id', { ascending: false }), filters);
   const { data, error, count } = await query.range(offset, offset + limit - 1);
   if (error) throw new Error(`Could not read the books: ${error.message}`);
 
@@ -289,6 +322,89 @@ export async function listQueue(merchantId: string, filters: QueueFilters = {}):
     total: count ?? 0,
     unreviewed: unreviewed ?? 0,
   };
+}
+
+/**
+ * Mark every unreviewed row matching `filters` reviewed with what it shows
+ * now: its category (or the suggestion, when it has none) and tax category.
+ * `categorizedOnly` leaves rows nothing could categorise in the queue; that
+ * is how auto-accept runs. Rows are updated in groups that share values, so
+ * a few thousand rows is a handful of statements, not one per row.
+ */
+export async function acceptSuggestions(
+  merchantId: string,
+  filters: Omit<QueueFilters, 'status' | 'sort' | 'dir' | 'limit' | 'offset'> = {},
+  { categorizedOnly = false, by = 'user' }: { categorizedOnly?: boolean; by?: 'user' | 'auto_accept' } = {},
+): Promise<number> {
+  const supabase = getSupabaseAdmin();
+  const accounts = await listAccounts(merchantId, { includeHidden: true });
+  const byId = new Map(accounts.map((a) => [a.id, a]));
+  const ids = queueAccountIds(accounts, filters);
+  if (ids.length === 0) return 0;
+
+  const groups = new Map<string, { category: string | null; taxCategory: string; ids: string[] }>();
+  for (let offset = 0; ; offset += 1000) {
+    const query = applyQueueFilters(
+      supabase
+        .from('finance_transactions')
+        .select('id, account_id, amount, category, tax_category, scope_override, suggested_category, suggested_tax_category')
+        .in('account_id', ids)
+        .eq('pending', false)
+        .order('id', { ascending: true }),
+      { ...filters, status: 'unreviewed' },
+    );
+    const { data, error } = await query.range(offset, offset + 999);
+    if (error) throw new Error(`Could not read the queue: ${error.message}`);
+    const page = (data ?? []) as Array<Record<string, unknown>>;
+    for (const row of page) {
+      const category = (row.category as string | null) ?? (row.suggested_category as string | null);
+      if (categorizedOnly && !category) continue;
+      const scope = (row.scope_override as string | null) ?? byId.get(row.account_id as string)?.effective_scope ?? 'personal';
+      const amount = parseExactAmount(row.amount) ?? '0';
+      const stored = (row.tax_category as string | null) ?? (row.suggested_tax_category as string | null);
+      const taxCategory = isTaxCategory(stored) ? stored : defaultTaxCategory(isSpendCategory(category) ? category : null, scope, !isNegativeAmount(amount));
+      const key = `${category ?? ''}|${taxCategory}`;
+      const group = groups.get(key) ?? { category, taxCategory, ids: [] };
+      group.ids.push(row.id as string);
+      groups.set(key, group);
+    }
+    if (page.length < 1000) break;
+  }
+
+  let accepted = 0;
+  const now = new Date().toISOString();
+  for (const group of groups.values()) {
+    for (let i = 0; i < group.ids.length; i += 200) {
+      const chunk = group.ids.slice(i, i + 200);
+      const { error } = await supabase
+        .from('finance_transactions')
+        .update({ category: group.category, tax_category: group.taxCategory, reviewed_at: now, updated_at: now })
+        .in('id', chunk)
+        .is('reviewed_at', null);
+      if (error) throw new Error(`Could not save the reviews: ${error.message}`);
+      accepted += chunk.length;
+    }
+  }
+  if (accepted > 0) await audit(merchantId, 'books.accept_all', 'merchant', merchantId, { accepted, by, categorizedOnly });
+  return accepted;
+}
+
+/** Whether suggestions are accepted as they land. On unless the merchant turned it off. */
+export async function getAutoAccept(merchantId: string): Promise<boolean> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('finance_books_settings')
+    .select('auto_accept')
+    .eq('merchant_id', merchantId)
+    .maybeSingle();
+  if (error) throw new Error(`Could not read the books settings: ${error.message}`);
+  return (data as { auto_accept?: boolean } | null)?.auto_accept !== false;
+}
+
+export async function setAutoAccept(merchantId: string, on: boolean): Promise<void> {
+  const { error } = await getSupabaseAdmin()
+    .from('finance_books_settings')
+    .upsert({ merchant_id: merchantId, auto_accept: on, updated_at: new Date().toISOString() }, { onConflict: 'merchant_id' });
+  if (error) throw new Error(`Could not save the books settings: ${error.message}`);
 }
 
 export interface ReviewInput {
@@ -378,6 +494,8 @@ export interface CategorizeOutcome {
   fromHeuristics: number;
   autoAccepted: number;
   queued: number;
+  /** Rows marked reviewed because auto-accept is on. */
+  reviewed?: number;
   /** Why the model pass did not run, when it did not. */
   modelError?: string;
 }
@@ -507,6 +625,9 @@ export async function runCategorization(
         if (heartbeat && !(await heartbeat())) break;
       }
     }
+  }
+  if (await getAutoAccept(merchantId)) {
+    outcome.reviewed = await acceptSuggestions(merchantId, {}, { categorizedOnly: true, by: 'auto_accept' });
   }
   await audit(merchantId, 'books.categorize', 'merchant', merchantId, { ...outcome });
   return outcome;

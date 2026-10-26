@@ -63,6 +63,44 @@ interface SummaryLine {
 
 type Tab = 'review' | 'rules' | 'summary';
 
+type SortDir = 'asc' | 'desc';
+interface SortState<K extends string> { key: K; dir: SortDir }
+
+/** Server-side sort keys for the review queue (see QUEUE_SORTS in lib/finances/books). */
+type QueueSortKey = 'posted' | 'payee' | 'account' | 'amount' | 'category' | 'tax_category' | 'confidence' | 'scope';
+
+/** Next sort for a header click: same column flips, a new one starts at `first`. */
+function nextSort<K extends string>(cur: SortState<K>, key: K, first: SortDir = 'asc'): SortState<K> {
+  return cur.key === key ? { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: first };
+}
+
+/** Sort a copy; numbers (and numeric strings like amounts) compare as numbers, blanks last. */
+function sortRows<T>(rows: T[], get: (r: T) => string | number | null | undefined, dir: SortDir): T[] {
+  const sign = dir === 'asc' ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const x = get(a);
+    const y = get(b);
+    if (x === null || x === undefined || x === '') return y === null || y === undefined || y === '' ? 0 : 1;
+    if (y === null || y === undefined || y === '') return -1;
+    const nx = typeof x === 'number' ? x : Number(x);
+    const ny = typeof y === 'number' ? y : Number(y);
+    if (!Number.isNaN(nx) && !Number.isNaN(ny)) return (nx - ny) * sign;
+    return String(x).localeCompare(String(y), undefined, { sensitivity: 'base', numeric: true }) * sign;
+  });
+}
+
+function SortTh<K extends string>({ label, k, sort, onSort, align = 'left', first = 'asc', title }: { label: string; k: K; sort: SortState<K>; onSort: (s: SortState<K>) => void; align?: 'left' | 'right'; first?: SortDir; title?: string }) {
+  const active = sort.key === k;
+  return (
+    <th className={`px-2 py-2 ${align === 'right' ? 'text-right' : 'text-left'}`} aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" onClick={() => onSort(nextSort(sort, k, first))} title={title} className={`inline-flex items-center gap-1 hover:text-gray-200 ${active ? 'text-gray-100' : ''}`}>
+        {label}
+        <span className="text-[10px] text-gray-500">{active ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+      </button>
+    </th>
+  );
+}
+
 const GUESSED_TZ = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC';
 
 function authHeaders(extra?: HeadersInit): HeadersInit {
@@ -102,6 +140,10 @@ export default function BooksContent() {
   const [busy, setBusy] = useState<string | null>(null);
   const [categorizing, setCategorizing] = useState(false);
   const [job, setJob] = useState<{ id: string; status: string; result?: Record<string, unknown> | null } | null>(null);
+  const [queueSort, setQueueSort] = useState<SortState<QueueSortKey>>({ key: 'posted', dir: 'desc' });
+  const [autoAccept, setAutoAccept] = useState(true);
+  const [rulesSort, setRulesSort] = useState<SortState<'pattern' | 'category' | 'tax' | 'scope' | 'hits'>>({ key: 'pattern', dir: 'asc' });
+  const [summarySort, setSummarySort] = useState<SortState<'label' | 'currency' | 'total' | 'rows'>>({ key: 'label', dir: 'asc' });
 
   // rules
   const [rules, setRules] = useState<Rule[]>([]);
@@ -286,6 +328,11 @@ export default function BooksContent() {
     if (!requireAuth(router)) return;
     const params = new URLSearchParams({ status, scope, limit: String(PAGE), offset: String(offset) });
     if (search.trim()) params.set('search', search.trim());
+    // Scope is per row (an override or the account's), so it sorts the loaded page only.
+    if (queueSort.key !== 'scope') {
+      params.set('sort', queueSort.key);
+      params.set('dir', queueSort.dir);
+    }
     const res = await fetch(`/api/finances/books/queue?${params.toString()}`, { headers: authHeaders(), cache: 'no-store' });
     const data = await res.json();
     if (res.status === 401 || res.status === 403) {
@@ -299,9 +346,10 @@ export default function BooksContent() {
     setCategories(data.categories);
     setTaxCategories(data.taxCategories);
     setModelEnabled(data.modelEnabled === true);
+    if (typeof data.autoAccept === 'boolean') setAutoAccept(data.autoAccept);
     setEdits({});
     setSelected(new Set());
-  }, [router, status, scope, search, offset]);
+  }, [router, status, scope, search, offset, queueSort]);
 
   const loadRules = useCallback(async () => {
     const res = await fetch('/api/finances/books/rules', { headers: authHeaders(), cache: 'no-store' });
@@ -351,7 +399,7 @@ export default function BooksContent() {
           const r = data.job.result ?? {};
           setNotice(
             data.job.status === 'completed'
-              ? `Categorisation finished: ${r.examined ?? 0} examined, ${r.fromRules ?? 0} by rule, ${r.fromModel ?? 0} by model, ${r.autoAccepted ?? 0} accepted, ${r.queued ?? 0} for review.${r.modelError ? ` Model pass skipped: ${r.modelError}` : ''}`
+              ? `Categorisation finished: ${r.examined ?? 0} examined, ${r.fromRules ?? 0} by rule, ${r.fromModel ?? 0} by model, ${r.autoAccepted ?? 0} accepted, ${r.queued ?? 0} for review.${r.reviewed ? ` Auto-accept approved ${r.reviewed}.` : ''}${r.modelError ? ` Model pass skipped: ${r.modelError}` : ''}`
               : `Categorisation failed: ${data.job.errorMessage ?? 'unknown error'}`,
           );
           setCategorizing(false);
@@ -421,6 +469,53 @@ export default function BooksContent() {
     }
   };
 
+  const approveAll = async () => {
+    const n = status === 'unreviewed' ? total : unreviewed;
+    const filtered = scope !== 'all' || search.trim();
+    if (!window.confirm(`Approve ${filtered ? 'every unreviewed row matching these filters' : `all ${n.toLocaleString()} unreviewed rows`} as suggested? Rows with no suggestion are approved as uncategorised.`)) return;
+    setBusy('all');
+    setError(null);
+    try {
+      const res = await fetch('/api/finances/books/bulk', {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ all: true, scope, search: search.trim() || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(readError(data, 'Could not approve the queue'));
+      setNotice(`Approved ${Number(data.reviewed).toLocaleString()} row(s) as suggested.`);
+      setOffset(0);
+      await loadQueue();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not approve the queue');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const toggleAutoAccept = async (on: boolean) => {
+    setBusy('auto');
+    setError(null);
+    try {
+      const res = await fetch('/api/finances/books/settings', {
+        method: 'PUT',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ autoAccept: on }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(readError(data, 'Could not save the setting'));
+      setAutoAccept(data.autoAccept);
+      setNotice(on
+        ? `Auto-accept on: suggestions are approved as they arrive${data.reviewed ? `; ${Number(data.reviewed).toLocaleString()} waiting row(s) approved now` : ''}.`
+        : 'Auto-accept off: new rows wait here for you to confirm.');
+      if (data.reviewed) await loadQueue();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the setting');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const categorize = async () => {
     setCategorizing(true);
     setError(null);
@@ -478,6 +573,41 @@ export default function BooksContent() {
     return c >= 0.9 ? 'text-emerald-300' : c >= 0.6 ? 'text-amber-300' : 'text-red-300';
   };
 
+  // Server already ordered the page; account (grouped by id server-side) and scope are refined here.
+  const viewRows = useMemo(() => {
+    if (queueSort.key === 'account') return sortRows(rows, (r) => r.accountName, queueSort.dir);
+    if (queueSort.key === 'scope') return sortRows(rows, (r) => editFor(r).scope, queueSort.dir);
+    return rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, edits, queueSort]);
+
+  const viewRules = useMemo(() => {
+    const get: Record<typeof rulesSort.key, (r: Rule) => string | number | null> = {
+      pattern: (r) => r.pattern,
+      category: (r) => r.category,
+      tax: (r) => r.tax_category,
+      scope: (r) => r.scope,
+      hits: (r) => r.hits,
+    };
+    return sortRows(rules, get[rulesSort.key], rulesSort.dir);
+  }, [rules, rulesSort]);
+
+  const viewSummaryLines = useMemo(() => {
+    if (!summary) return [];
+    const get: Record<typeof summarySort.key, (l: SummaryLine) => string | number> = {
+      label: (l) => l.label,
+      currency: (l) => l.currency,
+      total: (l) => l.total,
+      rows: (l) => l.rows,
+    };
+    return sortRows(summary.lines, get[summarySort.key], summarySort.dir);
+  }, [summary, summarySort]);
+
+  const onQueueSort = (next: SortState<QueueSortKey>) => {
+    setOffset(0);
+    setQueueSort(next);
+  };
+
   const periodOptions = useMemo(() => {
     const opts: string[] = [];
     for (let y = currentYear; y >= currentYear - 3; y -= 1) {
@@ -532,9 +662,16 @@ export default function BooksContent() {
             </select>
             <input type="search" placeholder="Search payee, description" value={search} onChange={(e) => { setOffset(0); setSearch(e.target.value); }} className={`${inputClass} w-56`} />
             <span className="text-xs text-gray-500">{total.toLocaleString()} rows</span>
-            <div className="ml-auto flex gap-2">
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-1 text-xs text-gray-300 cursor-pointer" title="Approve suggestions from rules, heuristics and the model as they arrive (each sync and categorisation run). Rows nothing could categorise still wait here.">
+                <input type="checkbox" checked={autoAccept} disabled={busy === 'auto'} onChange={(e) => toggleAutoAccept(e.target.checked)} />
+                Auto-accept suggestions
+              </label>
               <button type="button" className={btnSecondary} disabled={selected.size === 0 || busy === 'bulk'} onClick={confirmSelected}>
                 Confirm {selected.size} selected as suggested
+              </button>
+              <button type="button" className={btnPrimary} disabled={unreviewed === 0 || status === 'reviewed' || busy === 'all'} onClick={approveAll}>
+                {busy === 'all' ? 'Approving…' : `Approve all${status === 'unreviewed' && total > 0 ? ` ${total.toLocaleString()}` : ''}`}
               </button>
             </div>
           </div>
@@ -544,14 +681,14 @@ export default function BooksContent() {
               <thead className="text-gray-400">
                 <tr className="border-b border-slate-800">
                   <th className="px-2 py-2 text-left"><input type="checkbox" checked={selected.size > 0 && selected.size === rows.length} onChange={(e) => setSelected(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())} /></th>
-                  <th className="px-2 py-2 text-left">Date</th>
-                  <th className="px-2 py-2 text-left">Payee / description</th>
-                  <th className="px-2 py-2 text-left">Account</th>
-                  <th className="px-2 py-2 text-right">Amount</th>
-                  <th className="px-2 py-2 text-left">Category</th>
-                  <th className="px-2 py-2 text-left">Tax category</th>
-                  <th className="px-2 py-2 text-left">Scope</th>
-                  <th className="px-2 py-2 text-left">Source</th>
+                  <SortTh label="Date" k="posted" sort={queueSort} onSort={onQueueSort} first="desc" />
+                  <SortTh label="Payee / description" k="payee" sort={queueSort} onSort={onQueueSort} />
+                  <SortTh label="Account" k="account" sort={queueSort} onSort={onQueueSort} />
+                  <SortTh label="Amount" k="amount" sort={queueSort} onSort={onQueueSort} align="right" />
+                  <SortTh label="Category" k="category" sort={queueSort} onSort={onQueueSort} />
+                  <SortTh label="Tax category" k="tax_category" sort={queueSort} onSort={onQueueSort} />
+                  <SortTh label="Scope" k="scope" sort={queueSort} onSort={onQueueSort} title="Sorts the rows on this page" />
+                  <SortTh label="Source" k="confidence" sort={queueSort} onSort={onQueueSort} first="desc" title="By confidence" />
                   <th className="px-2 py-2 text-left"></th>
                 </tr>
               </thead>
@@ -559,7 +696,7 @@ export default function BooksContent() {
                 {rows.length === 0 && (
                   <tr><td colSpan={10} className="px-2 py-6 text-center text-gray-500">{status === 'unreviewed' ? 'Nothing waiting for review.' : 'No rows.'}</td></tr>
                 )}
-                {rows.map((r) => {
+                {viewRows.map((r) => {
                   const e = editFor(r);
                   return (
                     <tr key={r.id} className="border-b border-slate-800/60 align-top">
@@ -619,13 +756,26 @@ export default function BooksContent() {
           <p className="text-xs text-gray-500 mb-3">A rule matches the payee (or description) and sets the category, tax category and scope on every future sync. Created from the review queue with the "always" checkbox.</p>
           {rules.length === 0 && <p className="text-xs text-gray-500">No rules yet.</p>}
           <table className="w-full text-xs">
+            {rules.length > 0 && (
+              <thead className="text-gray-400">
+                <tr className="border-b border-slate-800">
+                  <SortTh label="Match" k="pattern" sort={rulesSort} onSort={setRulesSort} />
+                  <SortTh label="Category" k="category" sort={rulesSort} onSort={setRulesSort} />
+                  <SortTh label="Tax category" k="tax" sort={rulesSort} onSort={setRulesSort} />
+                  <SortTh label="Scope" k="scope" sort={rulesSort} onSort={setRulesSort} />
+                  <SortTh label="Hits" k="hits" sort={rulesSort} onSort={setRulesSort} align="right" first="desc" />
+                  <th className="px-2 py-2"></th>
+                </tr>
+              </thead>
+            )}
             <tbody>
-              {rules.map((rule) => (
+              {viewRules.map((rule) => (
                 <tr key={rule.id} className="border-b border-slate-800/60">
                   <td className="px-2 py-2 text-gray-300">{rule.match_field} {rule.match_type} <span className="text-gray-100">“{rule.pattern}”</span></td>
                   <td className="px-2 py-2 text-gray-300">{rule.category}</td>
                   <td className="px-2 py-2 text-gray-400">{rule.tax_category ?? '—'}</td>
                   <td className="px-2 py-2 text-gray-400">{rule.scope ?? 'account scope'}</td>
+                  <td className="px-2 py-2 text-right text-gray-400">{rule.hits}</td>
                   <td className="px-2 py-2 text-right"><button type="button" className="rounded border border-red-500/30 px-2 py-1 text-xs text-red-300" onClick={() => deleteRule(rule)}>Delete</button></td>
                 </tr>
               ))}
@@ -669,9 +819,16 @@ export default function BooksContent() {
                 {summary.totals.length === 0 && <div className="text-xs text-gray-500">No posted rows in this period and scope.</div>}
               </div>
               <table className="w-full text-xs">
-                <thead className="text-gray-400"><tr className="border-b border-slate-800"><th className="px-2 py-2 text-left">Tax category</th><th className="px-2 py-2 text-left">Currency</th><th className="px-2 py-2 text-right">Total</th><th className="px-2 py-2 text-right">Rows</th></tr></thead>
+                <thead className="text-gray-400">
+                  <tr className="border-b border-slate-800">
+                    <SortTh label="Tax category" k="label" sort={summarySort} onSort={setSummarySort} />
+                    <SortTh label="Currency" k="currency" sort={summarySort} onSort={setSummarySort} />
+                    <SortTh label="Total" k="total" sort={summarySort} onSort={setSummarySort} align="right" first="desc" />
+                    <SortTh label="Rows" k="rows" sort={summarySort} onSort={setSummarySort} align="right" first="desc" />
+                  </tr>
+                </thead>
                 <tbody>
-                  {summary.lines.map((l) => (
+                  {viewSummaryLines.map((l) => (
                     <tr key={`${l.taxCategory}-${l.currency}`} className={`border-b border-slate-800/60 ${l.excluded ? 'text-gray-500' : 'text-gray-200'}`}>
                       <td className="px-2 py-2">{l.label}</td>
                       <td className="px-2 py-2">{l.currency}</td>
