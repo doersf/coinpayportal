@@ -85,7 +85,7 @@ const nextConfig = {
               "object-src 'none'",
               "frame-ancestors 'none'",
               "base-uri 'self'",
-              "form-action 'self'",
+              "form-action 'self' https://pit.world",
             ].join('; '),
           },
           {
