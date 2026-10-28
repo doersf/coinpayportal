@@ -121,7 +121,13 @@ describe('mergeDeclaredCosts', () => {
 
   it('rolls a stated billing date forward to the next one', () => {
     const { charges } = mergeDeclaredCosts([], [cost({ nextExpected: '2026-08-01T00:00:00.000Z' })], { now: NOW });
-    expect(charges[0].nextExpected).toBe('2026-11-01T00:00:00.000Z');
+    expect(charges[0].nextExpected).toBe('2026-11-01T12:00:00.000Z');
+  });
+
+  it('keeps a date-only billing day on that calendar day in any US zone', () => {
+    const { charges } = mergeDeclaredCosts([], [cost({ nextExpected: '2026-11-01' })], { now: NOW });
+    const due = buildDueSoon({ charges, now: NOW, timezone: 'America/Los_Angeles', horizonDays: 7 });
+    expect(due.items[0].dueOn).toBe('2026-11-01');
   });
 });
 
