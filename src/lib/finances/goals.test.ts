@@ -77,6 +77,19 @@ describe('normalizeContribution', () => {
     expect(() => normalizeContribution({ amount: 5, occurredOn: '2026-11-01' }, TODAY)).toThrow(/future/);
     expect(() => normalizeContribution({ amount: 0 }, TODAY)).toThrow(/zero/);
   });
+
+  it('refuses a date before the goal started', () => {
+    expect(() => normalizeContribution({ amount: 5, occurredOn: '2026-10-20' }, TODAY, '2026-10-28')).toThrow(/before the goal started/);
+  });
+});
+
+describe('pace', () => {
+  it('a day with nothing on a payoff goal that needed something is short, not on pace', () => {
+    const g = goal({ kind: 'debt_payoff', targetAmount: 8000, startingAmount: 8000, startDate: '2026-07-01', deadline: '2027-12-31' });
+    const line = buildReport([{ goal: g, inputs: { ...empty, contributions: [contrib(900, '2026-09-15')] } }], 'daily', NOW, TODAY).goals[0];
+    expect(line.neededThisPeriod).toBeGreaterThan(0);
+    expect(line.pace).toBe('short');
+  });
 });
 
 describe('progressAt', () => {

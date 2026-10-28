@@ -316,7 +316,7 @@ export async function listContributions(merchantId: string, goalId: string): Pro
 export async function addContribution(merchantId: string, goalId: string, body: Record<string, unknown>, timezone: string): Promise<Contribution | null> {
   const goal = await getGoal(merchantId, goalId);
   if (!goal) return null;
-  const c = normalizeContribution(body, localDate(new Date(), timezone));
+  const c = normalizeContribution(body, localDate(new Date(), timezone), goal.startDate);
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from('finance_goal_contributions')

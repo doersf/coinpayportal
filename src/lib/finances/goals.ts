@@ -179,10 +179,12 @@ export function normalizeGoal(input: Record<string, unknown>, existing?: GoalDra
   return { name, kind: kindRaw, targetAmount, currency, startDate, deadline, startingAmount, linkedAccountIds, linkedWalletIds, notes };
 }
 
-export function normalizeContribution(input: Record<string, unknown>, today: string): { amount: number; occurredOn: string; note: string | null } {
+export function normalizeContribution(input: Record<string, unknown>, today: string, startDate?: string): { amount: number; occurredOn: string; note: string | null } {
   const amount = parseAmount(input.amount, 'amount', { allowNegative: true });
   const occurredOn = input.occurredOn === undefined || input.occurredOn === null || input.occurredOn === '' ? today : parseDate(input.occurredOn, 'occurredOn');
   if (occurredOn > today) throw new GoalError('occurredOn cannot be in the future');
+  // The goal's starting point already holds anything from before it began.
+  if (startDate && occurredOn < startDate) throw new GoalError(`occurredOn cannot be before the goal started (${startDate}); raise startingAmount instead`);
   const note = input.note === undefined || input.note === null ? null : String(input.note).trim().slice(0, 200) || null;
   return { amount, occurredOn, note };
 }
@@ -352,7 +354,8 @@ export function periodLine(goal: Goal, inputs: GoalInputs, period: GoalPeriod, n
   let pace: GoalPeriodLine['pace'];
   if (snapshot.status === 'achieved') pace = 'done';
   else if (change >= neededThisPeriod * 1.05 && change > 0) pace = 'ahead';
-  else if (change + 0.005 * goal.targetAmount >= neededThisPeriod) pace = 'on_pace';
+  // A twentieth of what the period needed is noise (a payment posting a day late), never more.
+  else if (change >= neededThisPeriod * 0.95) pace = 'on_pace';
   else pace = 'short';
   return {
     goal: { id: goal.id, name: goal.name, kind: goal.kind, currency: goal.currency, targetAmount: goal.targetAmount, deadline: goal.deadline },
