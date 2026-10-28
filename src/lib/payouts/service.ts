@@ -18,6 +18,8 @@ import {
 } from '@/lib/blockchain/providers';
 import { getCryptoPrice } from '@/lib/rates/tatum';
 import { requireEncryptionKey } from '../crypto/require-key';
+import { payoutFamilyFor, getPayoutWallet } from './payout-wallet';
+import { isEvmPayoutToken, checkTokenPayout, sendTokenPayout } from './evm-token-send';
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -107,8 +109,9 @@ export function isPlausibleWalletAddress(address: string, crypto: string): boole
 // ─── Core Functions ──────────────────────────────────────────────
 
 /**
- * Fetch the business's wallet for a given cryptocurrency,
- * including the encrypted private key needed for sending.
+ * The wallet a payout sends from: the business's payout wallet (a hot wallet
+ * CoinPay holds the key for) when the coin's family has one, else a receive
+ * wallet that happens to carry a key.
  */
 async function getBusinessSendWallet(
   supabase: SupabaseClient,
@@ -118,6 +121,14 @@ async function getBusinessSendWallet(
   wallet_address: string;
   encrypted_private_key: string;
 } | null> {
+  const family = payoutFamilyFor(cryptocurrency);
+  if (family) {
+    const payoutWallet = await getPayoutWallet(supabase, businessId, family);
+    if (payoutWallet) {
+      return { wallet_address: payoutWallet.address, encrypted_private_key: payoutWallet.encrypted_private_key };
+    }
+  }
+
   const { data, error } = await supabase
     .from('business_wallets')
     .select('wallet_address, encrypted_private_key')
@@ -182,8 +193,8 @@ export async function createPayout(
   if (!wallet) {
     return {
       success: false,
-      error: `No active wallet with a private key found for ${cryptocurrency}. ` +
-        'A wallet with an encrypted private key is required to send payouts.',
+      error: `No payout wallet for ${cryptocurrency}. ` +
+        'Create one with POST /api/businesses/<id>/payout-wallet and fund it before sending payouts.',
     };
   }
 
@@ -202,23 +213,40 @@ export async function createPayout(
   const chain = cryptocurrency as BlockchainType;
   const rpcUrl = getRpcUrl(chain);
   const provider = getProvider(chain, rpcUrl);
+  // The chain providers only move the native coin: an ERC-20 payout has to
+  // check and send the token itself (and have native gas for it).
+  const token = isEvmPayoutToken(cryptocurrency);
+  let tokenUnits: bigint | null = null;
 
-  let balance: string;
-  try {
-    balance = await provider.getBalance(wallet.wallet_address);
-  } catch (err) {
-    return {
-      success: false,
-      error: `Failed to check wallet balance: ${err instanceof Error ? err.message : err}`,
-    };
-  }
+  if (token) {
+    try {
+      const check = await checkTokenPayout(rpcUrl, cryptocurrency, wallet.wallet_address, amountCrypto);
+      if (!check.ok) return { success: false, error: check.error };
+      tokenUnits = check.units;
+    } catch (err) {
+      return {
+        success: false,
+        error: `Failed to check wallet balance: ${err instanceof Error ? err.message : err}`,
+      };
+    }
+  } else {
+    let balance: string;
+    try {
+      balance = await provider.getBalance(wallet.wallet_address);
+    } catch (err) {
+      return {
+        success: false,
+        error: `Failed to check wallet balance: ${err instanceof Error ? err.message : err}`,
+      };
+    }
 
-  const balanceNum = parseFloat(balance);
-  if (isNaN(balanceNum) || balanceNum < amountCrypto) {
-    return {
-      success: false,
-      error: `Insufficient balance. Wallet has ${balance} ${cryptocurrency}, need ${amountCrypto.toFixed(8)} ${cryptocurrency} ($${input.amount_usd} USD)`,
-    };
+    const balanceNum = parseFloat(balance);
+    if (isNaN(balanceNum) || balanceNum < amountCrypto) {
+      return {
+        success: false,
+        error: `Insufficient balance. Wallet has ${balance} ${cryptocurrency}, need ${amountCrypto.toFixed(8)} ${cryptocurrency} ($${input.amount_usd} USD)`,
+      };
+    }
   }
 
   // ── Create payout record ──
@@ -248,16 +276,27 @@ export async function createPayout(
   try {
     const privateKey = decrypt(wallet.encrypted_private_key, requireEncryptionKey('payout'));
 
-    if (!provider.sendTransaction) {
-      throw new Error(`${cryptocurrency} provider does not support sending transactions`);
+    let txHash: string;
+    if (token && tokenUnits !== null) {
+      txHash = await sendTokenPayout(
+        rpcUrl,
+        cryptocurrency,
+        wallet.wallet_address,
+        input.recipient_wallet,
+        tokenUnits,
+        privateKey
+      );
+    } else {
+      if (!provider.sendTransaction) {
+        throw new Error(`${cryptocurrency} provider does not support sending transactions`);
+      }
+      txHash = await provider.sendTransaction(
+        wallet.wallet_address,
+        input.recipient_wallet,
+        amountCrypto.toString(),
+        privateKey
+      );
     }
-
-    const txHash = await provider.sendTransaction(
-      wallet.wallet_address,
-      input.recipient_wallet,
-      amountCrypto.toString(),
-      privateKey
-    );
 
     // ── Mark completed ──
     const { data: updated, error: updateErr } = await supabase
