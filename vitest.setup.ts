@@ -19,6 +19,12 @@ process.env.NEXT_PUBLIC_SUPABASE_URL ||= 'https://test.supabase.co';
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= 'test-anon-key';
 
+// Merchant webhooks go through the @profullstack/webhooks hub in production
+// (src/lib/webhooks/hub.ts). The older suites assert the direct sender, which
+// stays as the WEBHOOKS_HUB=off fallback, so they run with the hub off; the
+// hub's own suites (hub.test.ts, legacy-receivers.test.ts) switch it on.
+process.env.WEBHOOKS_HUB ||= 'off';
+
 // Reputation credential signing key.
 //
 // `src/lib/reputation/crypto.ts` used to fall back to the literal

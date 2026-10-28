@@ -14,6 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getProvider, getRpcUrl, type BlockchainType } from '../blockchain/providers';
 import { generatePaymentAddress, hashStringToNumber } from '../blockchain/wallets';
 import { deliverWebhook, logWebhookAttempt, retryFailedWebhook } from '../webhooks/service';
+import { queueBusinessWebhook, webhooksHubEnabled } from '../webhooks/hub';
 import { decrypt } from '../crypto/encryption';
 import { resolveWebhookSecret } from '../webhooks/secret';
 import { getCryptoPrice } from '../rates/tatum';
@@ -729,6 +730,18 @@ async function sendBusinessCollectionWebhook(
       ...paymentData,
       timestamp: new Date().toISOString(),
     };
+
+    // Through the webhooks hub: the same flat body (stamped once, at queue
+    // time, rather than per attempt) and X-CoinPay-Signature, with retries.
+    if (webhooksHubEnabled() && business.webhook_secret) {
+      const queued = await queueBusinessWebhook({
+        businessId,
+        event,
+        payload: { ...payload },
+        subject: `business_collection:${paymentId}`,
+      });
+      if (queued) return { success: queued.success, error: queued.error };
+    }
 
     // Deliver webhook with retries
     const plaintextSecret = resolveWebhookSecret(business.webhook_secret || '', business.merchant_id);
