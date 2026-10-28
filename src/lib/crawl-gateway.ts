@@ -24,6 +24,11 @@ const env = (name: string) => process.env[name];
  * under it is credentialed or a health/discovery read, and the throttle still
  * meters it. The explorer is deliberately absent: it is the scraped surface,
  * and has its own daily tiers.
+ *
+ * The docs and the machine-readable descriptions (llms.txt, the OpenAPI spec,
+ * .well-known) are how an integrator learns to pay us. An agent without a Base
+ * wallet was quoted 1 USDC to read how to integrate, which it cannot do, so
+ * they are never charged either.
  */
 export const COINPAY_APP_PATHS = [
   "/api",
@@ -34,13 +39,19 @@ export const COINPAY_APP_PATHS = [
   "/contractor",
   "/contractors",
   "/custody",
+  "/.well-known",
+  "/docs",
   "/documents",
   "/escrow",
   "/finances",
   "/invite",
   "/invoices",
+  "/llms-full.txt",
+  "/llms.txt",
   "/lnurlp",
   "/now",
+  "/openapi.json",
+  "/openapi.yaml",
   "/payments",
   "/payouts",
   "/portal",

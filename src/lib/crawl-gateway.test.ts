@@ -36,6 +36,21 @@ describe('crawl gateway', () => {
     '/api/webhooks/coinpay',
   ];
 
+  // How an integrator learns to pay us; an agent with no Base wallet was quoted 1 USDC for it.
+  const docs = ['/docs', '/docs/sdk', '/docs/prompts', '/llms.txt', '/llms-full.txt', '/openapi.yaml', '/openapi.json', '/.well-known/oauth-authorization-server'];
+
+  it('never charges the docs, to any agent, in any format', async () => {
+    for (const ua of [STALE, HEADLESS, 'GPTBot/1.0', 'ClaudeBot/1.0', 'python-requests/2.31']) {
+      for (const accept of ['text/html', 'application/json', 'text/markdown']) {
+        for (const path of docs) expect(await gate(get(path, ua, { accept }) as never), `${path} ${ua} ${accept}`).toBeFalsy();
+      }
+    }
+  });
+
+  it('still charges a lookalike of a docs path', async () => {
+    expect((await gate(get('/docsearch', 'GPTBot/1.0') as never))?.status).toBe(402);
+  });
+
   for (const ua of [STALE, HEADLESS]) {
     it(`never charges sign-in or the app (${ua.match(/\w*Chrome\/\d+/)?.[0]})`, async () => {
       for (const path of app) expect(await gate(get(path, ua) as never), path).toBeFalsy();
