@@ -37,7 +37,7 @@ describe('crawl gateway', () => {
   ];
 
   // How an integrator learns to pay us; an agent with no Base wallet was quoted 1 USDC for it.
-  const docs = ['/docs', '/docs/sdk', '/docs/prompts', '/llms.txt', '/llms-full.txt', '/openapi.yaml', '/openapi.json', '/.well-known/oauth-authorization-server'];
+  const docs = ['/robots.txt', '/sitemap.xml', '/docs', '/docs/sdk', '/docs/prompts', '/llms.txt', '/llms-full.txt', '/openapi.yaml', '/openapi.json', '/.well-known/oauth-authorization-server'];
 
   it('never charges the docs, to any agent, in any format', async () => {
     for (const ua of [STALE, HEADLESS, 'GPTBot/1.0', 'ClaudeBot/1.0', 'python-requests/2.31']) {
@@ -49,6 +49,7 @@ describe('crawl gateway', () => {
 
   it('still charges a lookalike of a docs path', async () => {
     expect((await gate(get('/docsearch', 'GPTBot/1.0') as never))?.status).toBe(402);
+    expect((await gate(get('/sitemap.xml.bak', 'GPTBot/1.0') as never))?.status).toBe(402);
   });
 
   for (const ua of [STALE, HEADLESS]) {

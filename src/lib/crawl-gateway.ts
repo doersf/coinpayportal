@@ -28,7 +28,8 @@ const env = (name: string) => process.env[name];
  * The docs and the machine-readable descriptions (llms.txt, the OpenAPI spec,
  * .well-known) are how an integrator learns to pay us. An agent without a Base
  * wallet was quoted 1 USDC to read how to integrate, which it cannot do, so
- * they are never charged either.
+ * they are never charged either. Nor are robots.txt and the sitemap it points
+ * at: a sitemap only a paying crawler can read is no sitemap.
  */
 export const COINPAY_APP_PATHS = [
   "/api",
@@ -58,7 +59,9 @@ export const COINPAY_APP_PATHS = [
   "/projects",
   "/proposals",
   "/remittance",
+  "/robots.txt",
   "/sign",
+  "/sitemap.xml",
   "/subscriptions",
   "/transactions",
   "/wallet",
