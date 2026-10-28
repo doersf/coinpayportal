@@ -6,6 +6,7 @@ import { isIP } from 'net';
 import { enqueueFailedDelivery } from './retry-queue';
 import { webhookCustomerFields } from '@/lib/checkout/customer';
 import { markCheckoutSessionPaidFromWebhook } from '@/lib/checkout/settle';
+import { queueBusinessWebhook, signWebhookBody, webhooksHubEnabled } from './hub';
 
 /**
  * Synchronous SSRF pre-check on a webhook URL.
@@ -172,15 +173,7 @@ export function signWebhookPayload(
   secret: string,
   timestamp?: number
 ): string {
-  const ts = timestamp ?? Math.floor(Date.now() / 1000);
-  const payloadString = JSON.stringify(payload);
-  const signedPayload = `${ts}.${payloadString}`;
-
-  const signature = createHmac('sha256', secret)
-    .update(signedPayload)
-    .digest('hex');
-
-  return `t=${ts},v1=${signature}`;
+  return signWebhookBody(JSON.stringify(payload), secret, timestamp);
 }
 
 /**
@@ -634,6 +627,18 @@ export async function sendPaymentWebhook(
       business_id: businessId,
     };
 
+    // Through the webhooks hub: same body, same X-CoinPay-Signature, durable
+    // retries. Falls through to the direct sender below only if the hub could
+    // not take the delivery at all (or WEBHOOKS_HUB=off).
+    if (webhooksHubEnabled()) {
+      const queued = await queueBusinessWebhook({ businessId, event, payload, subject: `payment:${paymentId}` });
+      if (queued) {
+        if (queued.success) console.log(`[Webhook] Delivered ${event} webhook for payment ${paymentId}`);
+        else console.warn(`[Webhook] ${event} for payment ${paymentId} not delivered yet (${queued.error}); hub will retry`);
+        return { success: queued.success, error: queued.error };
+      }
+    }
+
     const payloadString = JSON.stringify(payload);
 
     // Sign with the DECRYPTED secret. The merchant's verifier (e.g. d0rz's
@@ -808,6 +813,11 @@ export async function sendEscrowWebhook(
       created_at: now.toISOString(),
       business_id: businessId,
     };
+
+    if (webhooksHubEnabled()) {
+      const queued = await queueBusinessWebhook({ businessId, event, payload, subject: `escrow:${escrowId}` });
+      if (queued) return { success: queued.success, error: queued.error };
+    }
 
     const payloadString = JSON.stringify(payload);
     const plaintextSecret = resolveWebhookSecret(business.webhook_secret, business.merchant_id);

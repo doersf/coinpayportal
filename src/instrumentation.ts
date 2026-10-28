@@ -70,6 +70,21 @@ export async function register() {
       console.log('[Instrumentation] Finance worker disabled');
     }
 
+    // Merchant webhook retries (@profullstack/webhooks outbox). Started on every
+    // server process: the claim is FOR UPDATE SKIP LOCKED, so several processes
+    // never send the same delivery. WEBHOOKS_HUB=off switches the hub off.
+    try {
+      const { startWebhooksHub, webhooksHubEnabled } = await import('./lib/webhooks/hub');
+      if (webhooksHubEnabled()) {
+        startWebhooksHub();
+        console.log('[Instrumentation] Webhooks hub drainer started');
+      } else {
+        console.log('[Instrumentation] Webhooks hub disabled (WEBHOOKS_HUB=off)');
+      }
+    } catch (err) {
+      console.error('[Instrumentation] webhooks hub failed to start', err instanceof Error ? err.message : err);
+    }
+
     const enableBackgroundMonitor = process.env.ENABLE_BACKGROUND_MONITOR === 'true';
     if (!enableBackgroundMonitor) {
       console.log('[Instrumentation] Background monitor disabled (ENABLE_BACKGROUND_MONITOR != true)');

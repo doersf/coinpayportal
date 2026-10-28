@@ -1050,6 +1050,41 @@ The `X-CoinPay-Signature` header contains:
 - `t` - Unix timestamp when the signature was generated
 - `v1` - HMAC-SHA256 signature of `{timestamp}.{payload}`
 
+Every delivery also carries [Standard Webhooks](https://www.standardwebhooks.com/) headers, so any
+Standard Webhooks library (or `@profullstack/webhooks` `verifySignature`) can verify it too. Nothing
+needs to change on your side: `X-CoinPay-Signature` and the body above stay exactly as they are.
+
+```
+webhook-id: evt_abc123def456        the event id, identical on every retry: dedupe on it
+webhook-timestamp: 1702234567
+webhook-signature: v1,<base64 HMAC-SHA256 of "{webhook-id}.{webhook-timestamp}.{body}">
+webhook-event: payment.confirmed
+```
+
+**Retries.** Any non-2xx answer, timeout or network error is retried: after 1 s, 2 s, 1 min, 5 min,
+15 min, 1 h, 3 h, 6 h, 12 h, 12 h, 24 h and 48 h (13 attempts over about 4.4 days), for every event
+type. Each retry has a fresh timestamp and signature over the same body. Delivery is at least once,
+so treat a repeated `id` as already handled.
+
+### More endpoints: `/api/v1/webhooks`
+
+With a full-access API key (`Authorization: Bearer <key>`) you can add more receivers next to the
+business webhook. These get CloudEvents 1.0 bodies (`specversion`, `id`, `type`, `source`,
+`subject`, `time`, `data`) signed with Standard Webhooks headers and a `whsec_` secret shown on create.
+
+| Route | Does |
+| --- | --- |
+| `GET /api/v1/webhooks` | endpoints + event types |
+| `POST /api/v1/webhooks` `{ url, events?, description? }` | new endpoint; returns `{ endpoint, secret }` |
+| `GET` / `PATCH` / `DELETE /api/v1/webhooks/:id` | read, change, remove |
+| `GET /api/v1/webhooks/:id/secret`, `POST /:id/rotate` | show or replace the secret |
+| `POST /api/v1/webhooks/:id/test` | send `webhook.test` now |
+| `GET /api/v1/webhooks/deliveries`, `GET /:id/deliveries` | delivery log with payloads |
+| `POST /api/v1/webhooks/deliveries/:id/retry` | send one again |
+
+The business webhook appears there as `biz_<business id>` (read-only: its URL and secret are managed
+in business settings).
+
 ### Payload Structure
 
 ```json

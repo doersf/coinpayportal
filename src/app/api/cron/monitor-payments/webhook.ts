@@ -9,6 +9,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveWebhookSecret } from '@/lib/webhooks/secret';
 import type { Payment } from './types';
 import { safeFetch } from '@/lib/security/ssrf';
+import { queueBusinessWebhook, webhooksHubEnabled } from '@/lib/webhooks/hub';
 
 /**
  * Send webhook notification for payment status change
@@ -51,6 +52,16 @@ export async function sendWebhook(
       business_id: payment.business_id,
     };
     
+    // Through the webhooks hub (same body and X-CoinPay-Signature, now with
+    // retries). A business with no secret keeps the old unsigned direct send.
+    if (webhooksHubEnabled() && business.webhook_secret) {
+      const queued = await queueBusinessWebhook({ businessId: payment.business_id, event, payload, subject: `payment:${payment.id}` });
+      if (queued) {
+        console.log(`Webhook ${queued.success ? 'sent' : 'queued for retry'} for payment ${payment.id}: ${event}`);
+        return;
+      }
+    }
+
     const payloadString = JSON.stringify(payload);
     
     // Create HMAC signature in SDK format: t=timestamp,v1=signature
