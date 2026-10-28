@@ -197,6 +197,10 @@ function nextOnOrAfter(iso: string | null, cadence: DeclaredCadence, now: Date):
   if (!iso) return '';
   const d = new Date(iso);
   if (!Number.isFinite(d.getTime())) return '';
+  // A stated billing date is a calendar day ("next_due": "2026-11-01"),
+  // which arrives as UTC midnight: the evening before in the Americas. Noon
+  // UTC is the same calendar day from UTC-11 to UTC+11.
+  if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0) d.setUTCHours(12);
   const step = cadence === 'yearly' ? 12 : 1;
   const floor = now.getTime() - 86_400_000;
   for (let i = 0; i < 600 && d.getTime() < floor; i += 1) d.setUTCMonth(d.getUTCMonth() + step);
