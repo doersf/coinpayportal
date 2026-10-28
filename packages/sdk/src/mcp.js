@@ -80,6 +80,77 @@ export const TOOLS = [
     },
   },
   {
+    name: 'finance_goals',
+    description: 'Savings and payoff goals (buy a house or car, emergency fund, pay off debt): each with progress, percent, on track/behind/achieved/past deadline, and what it takes per day/week/month/quarter to finish by the deadline. Not financial advice.',
+    inputSchema: { type: 'object', properties: { archived: { type: 'boolean', description: 'Include archived goals' } }, additionalProperties: false },
+    handler: async (args, { client }) => text(await reports.listGoals(client, { archived: args.archived === true })),
+  },
+  {
+    name: 'finance_goal_create',
+    description: 'Create a goal. kind: house, car, emergency_fund, debt_payoff or custom. Link finance account ids (finance_accounts; debt accounts for a payoff goal) or web wallet ids so progress follows real balances; otherwise progress is startingAmount plus recorded contributions. A payoff goal linked to debt accounts with no startingAmount starts at what they owe now.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        kind: { type: 'string', enum: ['house', 'car', 'emergency_fund', 'debt_payoff', 'custom'] },
+        targetAmount: { type: ['number', 'string'] },
+        deadline: { type: 'string', description: 'YYYY-MM-DD' },
+        currency: { type: 'string', description: 'Default USD' },
+        startDate: { type: 'string', description: 'YYYY-MM-DD, default today' },
+        startingAmount: { type: ['number', 'string'], description: 'Already saved (save goal) or the debt at the start (payoff goal)' },
+        linkedAccountIds: { type: 'array', items: { type: 'string' } },
+        linkedWalletIds: { type: 'array', items: { type: 'string' } },
+        notes: { type: 'string' },
+      },
+      required: ['name', 'kind', 'deadline'],
+      additionalProperties: false,
+    },
+    handler: async (args, { client }) => text({ goal: await reports.createGoal(client, args) }),
+  },
+  {
+    name: 'finance_goal_contribute',
+    description: 'Record an amount put toward a goal, or a payment on a payoff goal (negative = withdrawal). Records only; moves no money.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        goalId: { type: 'string' },
+        amount: { type: ['number', 'string'] },
+        occurredOn: { type: 'string', description: 'YYYY-MM-DD, default today' },
+        note: { type: 'string' },
+      },
+      required: ['goalId', 'amount'],
+      additionalProperties: false,
+    },
+    handler: async (args, { client }) => text({ contribution: await reports.addGoalContribution(client, args.goalId, { amount: args.amount, occurredOn: args.occurredOn, note: args.note }) }),
+  },
+  {
+    name: 'finance_goals_report',
+    description: 'The goals progress report for the trailing day, week, month or quarter: each goal\'s change in the period, what the period needed to stay on schedule, pace (ahead/on pace/short), and overall status.',
+    inputSchema: { type: 'object', properties: { period: { type: 'string', enum: ['daily', 'weekly', 'monthly', 'quarterly'] } }, additionalProperties: false },
+    handler: async (args, { client }) => text((await reports.getGoalsReport(client, { period: args.period || 'weekly' })).text),
+  },
+  {
+    name: 'finance_goals_digest',
+    description: 'The opt-in goals report email: show it, turn it on at a cadence (daily, weekly, monthly, quarterly; optional hour 0-23 and recipients), turn it off, or send one now.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['show', 'on', 'off', 'send_now'] },
+        cadence: { type: 'string', enum: ['daily', 'weekly', 'monthly', 'quarterly'] },
+        hour: { type: 'integer', minimum: 0, maximum: 23 },
+        to: { type: 'array', items: { type: 'string' }, maxItems: 5 },
+      },
+      required: ['action'],
+      additionalProperties: false,
+    },
+    handler: async (args, { client }) => {
+      if (args.action === 'on') return text({ schedule: await reports.setGoalsDigest(client, { cadence: args.cadence, hour: args.hour, recipients: args.to }) });
+      if (args.action === 'off') return text(await reports.deleteGoalsDigest(client));
+      if (args.action === 'send_now') return text(await reports.sendGoalsDigestNow(client));
+      return text({ schedule: await reports.getGoalsDigest(client) });
+    },
+  },
+  {
     name: 'finance_summary',
     description: 'Balance sheet (assets, debt, net by currency), cashflow for the window, top spending categories, and the debt-and-income position.',
     inputSchema: { type: 'object', properties: { days: { type: 'integer', minimum: 1, maximum: 3650, description: 'Cashflow window (default 30)' } }, additionalProperties: false },

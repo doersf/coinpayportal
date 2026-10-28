@@ -32,6 +32,7 @@ const COPY = {
   weekly_digest: { name: 'the weekly digest', title: 'Turn off the weekly digest', on: '<a href="/finances/books#weekly-digest">Finances settings</a>' },
   weekly_payments: { name: 'the weekly payments report', title: 'Turn off the weekly payments report', on: '<a href="/settings#weekly-payments">Settings</a>' },
   business_report: { name: 'the business report', title: 'Turn off the business report', on: '<a href="/finances/books#business-report">Finances settings</a>' },
+  goals_digest: { name: 'the goals report', title: 'Turn off the goals report', on: '<a href="/finances/goals">Goals</a>' },
 } as const;
 
 export async function GET(req: NextRequest) {

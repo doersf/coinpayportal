@@ -299,3 +299,55 @@ describe('finances costs (declared recurring costs)', () => {
     expect(text).toMatch(/next \?\s+monthly .* DEDIROCK .* · declared/);
   });
 });
+
+describe('finances goals', () => {
+  const GOAL = {
+    id: '11111111-2222-3333-4444-555555555555', name: 'Down payment', kind: 'house', targetAmount: 60000, currency: 'USD',
+    startDate: '2026-10-28', deadline: '2031-06-30', direction: 'save',
+    snapshot: { progress: 5000, remaining: 55000, percent: 8.3, expectedByNow: 5000, status: 'on_track', daysLeft: 1706, required: { perDay: 32.24, perWeek: 225.67, perMonth: 981.27, perQuarter: 2943.8 }, recentPerMonth: null, projectedDate: null, exact: true },
+  };
+
+  it('creates a goal from flags', async () => {
+    const client = fakeClient({ 'POST /finances/goals': () => ({ goal: GOAL }) });
+    const { ctx, out } = ctxFor(client);
+    const code = await runFinancesCommand('goals', ['create'], { name: 'Down payment', kind: 'house', target: 60000, deadline: '2031-06-30', 'start-amount': 5000 }, ctx);
+    expect(code).toBe(EXIT.OK);
+    expect(JSON.parse(client.calls[0].options.body)).toMatchObject({ name: 'Down payment', kind: 'house', targetAmount: '60000', deadline: '2031-06-30', startingAmount: '5000' });
+    expect(out.join('\n')).toMatch(/Down payment .* on track .* \$981\.27\/mo to finish/);
+  });
+
+  it('records a contribution by id prefix', async () => {
+    const client = fakeClient({
+      'GET /finances/goals': () => ({ goals: [GOAL] }),
+      [`POST /finances/goals/${GOAL.id}/contributions`]: () => ({ contribution: { id: 'c', amount: 250, occurredOn: '2026-10-28', note: null } }),
+    });
+    const { ctx, out } = ctxFor(client);
+    expect(await runFinancesCommand('goals', ['contribute', '11111111', '250'], {}, ctx)).toBe(EXIT.OK);
+    expect(JSON.parse(client.calls[1].options.body).amount).toBe('250');
+    expect(out.join('\n')).toMatch(/nothing was moved/);
+  });
+
+  it('prints each report period and refuses a bad one', async () => {
+    const client = fakeClient({ 'GET /finances/goals/report': (path) => ({ report: {}, text: `report ${path.split('period=')[1]}` }) });
+    for (const period of ['daily', 'weekly', 'monthly', 'quarterly']) {
+      const { ctx, out } = ctxFor(client);
+      expect(await runFinancesCommand('goals', ['report'], { period }, ctx)).toBe(EXIT.OK);
+      expect(out.join('\n')).toBe(`report ${period}`);
+    }
+    const { ctx } = ctxFor(client);
+    expect(await runFinancesCommand('goals', ['report'], { period: 'yearly' }, ctx)).toBe(EXIT.INVALID);
+  });
+
+  it('turns the digest on with a cadence', async () => {
+    const client = fakeClient({ 'POST /finances/email-schedules': () => ({ schedule: { active: true, cadence: 'monthly', hour: 8, timezone: 'UTC', recipients: ['a@x.test'], nextRunAt: '2026-11-01T08:00:00Z' } }) });
+    const { ctx, out } = ctxFor(client);
+    expect(await runFinancesCommand('goals', ['digest', 'on'], { cadence: 'monthly', timezone: 'UTC' }, ctx)).toBe(EXIT.OK);
+    expect(JSON.parse(client.calls[0].options.body)).toMatchObject({ kind: 'goals_digest', cadence: 'monthly' });
+    expect(out.join('\n')).toMatch(/Goals report on · monthly/);
+  });
+
+  it('refuses delete without --yes', async () => {
+    const { ctx } = ctxFor(fakeClient({}));
+    expect(await runFinancesCommand('goals', ['delete', GOAL.id], {}, ctx)).toBe(EXIT.INVALID);
+  });
+});

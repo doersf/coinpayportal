@@ -965,6 +965,126 @@ export async function runFinancesCommand(subcommand, args, flags, ctx) {
         throw new CliExit(EXIT.INVALID, 'Usage: coinpay finances costs [list [--source s]|import <file|url> [--source opendevice] [--header "K: V"]|clear --source s --yes]');
       }
 
+      case 'goals':
+      case 'goal': {
+        const action = args[0] || 'list';
+        const usage = 'Usage: coinpay finances goals [list|show <id>|create --name "Down payment" --kind house|car|emergency_fund|debt_payoff|custom --target 60000 --deadline 2031-06-30 [--start-amount 5000] [--account <id>,<id>] [--wallet <id>]|contribute <id> <amount> [--date 2026-10-01] [--note "..."]|report [--period daily|weekly|monthly|quarterly]|digest [show|on --cadence monthly [--hour 8]|off|send-now]|sources|archive <id>|delete <id> --yes]';
+        const money = (cur, n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: cur || 'USD', maximumFractionDigits: 2 }).format(n);
+        const STATUS = { achieved: 'achieved', on_track: 'on track', behind: 'BEHIND', overdue: 'PAST DEADLINE' };
+        const line = (g) => {
+          const s = g.snapshot;
+          const pace = s.status === 'achieved' ? '' : ` · ${money(g.currency, s.required.perMonth)}/mo to finish`;
+          return `  ${g.id.slice(0, 8)}  ${g.name.padEnd(24).slice(0, 24)} ${money(g.currency, s.progress).padStart(12)} / ${money(g.currency, g.targetAmount).padEnd(12)} ${String(s.percent).padStart(5)}%  ${STATUS[s.status].padEnd(13)} by ${g.deadline}${pace}`;
+        };
+        const resolveId = async (prefix) => {
+          if (!prefix) throw new CliExit(EXIT.INVALID, usage);
+          if (/^[0-9a-f-]{36}$/i.test(prefix)) return prefix;
+          const { goals } = await api.listGoals(client, { archived: true });
+          const hits = goals.filter((g) => g.id.startsWith(prefix));
+          if (hits.length !== 1) throw new CliExit(EXIT.INVALID, hits.length ? `"${prefix}" matches ${hits.length} goals; give more of the id` : `No goal ${prefix}`);
+          return hits[0].id;
+        };
+        if (action === 'list') {
+          const data = await api.listGoals(client, { archived: Boolean(flags.archived) });
+          emit(data, data.goals.length ? [`${data.goals.length} goal(s)`, ...data.goals.map(line), '', data.disclaimer].join('\n') : 'No goals yet. Create one: coinpay finances goals create --name "Down payment" --kind house --target 60000 --deadline 2031-06-30');
+          return EXIT.OK;
+        }
+        if (action === 'show') {
+          const data = await api.getGoal(client, await resolveId(args[1]));
+          const g = data.goal;
+          const s = g.snapshot;
+          const text = [
+            `${g.name} (${g.kind}) · ${STATUS[s.status]}`,
+            `  ${money(g.currency, s.progress)} of ${money(g.currency, g.targetAmount)} (${s.percent}%) · started ${g.startDate} · deadline ${g.deadline} (${s.daysLeft} days)`,
+            `  Expected by now: ${money(g.currency, s.expectedByNow)} · remaining ${money(g.currency, s.remaining)}`,
+            `  To finish on time: ${money(g.currency, s.required.perDay)}/day · ${money(g.currency, s.required.perWeek)}/week · ${money(g.currency, s.required.perMonth)}/month · ${money(g.currency, s.required.perQuarter)}/quarter`,
+            s.recentPerMonth !== null ? `  Last 90 days: ${money(g.currency, s.recentPerMonth)}/month${s.projectedDate ? `, lands ${s.projectedDate}` : ''}` : null,
+            data.contributions.length ? `  Contributions: ${data.contributions.slice(0, 10).map((c) => `${c.occurredOn} ${money(g.currency, c.amount)}`).join(', ')}` : null,
+          ].filter(Boolean).join('\n');
+          emit(data, text);
+          return EXIT.OK;
+        }
+        if (action === 'create' || action === 'add') {
+          const goal = {
+            name: typeof flags.name === 'string' ? flags.name : args.slice(1).join(' '),
+            kind: typeof flags.kind === 'string' ? flags.kind : 'custom',
+            targetAmount: flags.target !== undefined ? String(flags.target) : undefined,
+            deadline: typeof flags.deadline === 'string' ? flags.deadline : undefined,
+            currency: typeof flags.currency === 'string' ? flags.currency : undefined,
+            startingAmount: flags['start-amount'] !== undefined ? String(flags['start-amount']) : undefined,
+            linkedAccountIds: flags.account ? listFlag(flags.account) : undefined,
+            linkedWalletIds: flags.wallet ? listFlag(flags.wallet) : undefined,
+            notes: typeof flags.notes === 'string' ? flags.notes : undefined,
+          };
+          if (!goal.name || !goal.deadline) throw new CliExit(EXIT.INVALID, usage);
+          const g = await api.createGoal(client, goal);
+          emit({ goal: g }, `Created ${g.id}\n${g.snapshot ? line(g) : ''}`);
+          return EXIT.OK;
+        }
+        if (action === 'contribute' || action === 'pay') {
+          const id = await resolveId(args[1]);
+          if (args[2] === undefined) throw new CliExit(EXIT.INVALID, usage);
+          const c = await api.addGoalContribution(client, id, { amount: args[2], occurredOn: typeof flags.date === 'string' ? flags.date : undefined, note: typeof flags.note === 'string' ? flags.note : undefined });
+          emit({ contribution: c }, `Recorded ${c.amount} on ${c.occurredOn}. (Recorded only; nothing was moved.)`);
+          return EXIT.OK;
+        }
+        if (action === 'report') {
+          const period = typeof flags.period === 'string' ? flags.period : args[1] || 'weekly';
+          if (!['daily', 'weekly', 'monthly', 'quarterly'].includes(period)) throw new CliExit(EXIT.INVALID, '--period must be daily, weekly, monthly or quarterly');
+          const data = await api.getGoalsReport(client, { period });
+          if (json) { out(JSON.stringify(data.report, null, 2)); return EXIT.OK; }
+          out(data.text);
+          return EXIT.OK;
+        }
+        if (action === 'sources') {
+          const data = await api.getGoalSources(client);
+          emit(data, [
+            'Accounts:',
+            ...data.accounts.map((a) => `  ${a.id}  ${(a.institution ? `${a.institution} · ` : '') + a.name}${a.liability ? ' (debt)' : ''}${a.balance !== null ? `  ${money(a.currency, a.balance)}` : ''}`),
+            'Wallets:',
+            ...(data.wallets.length ? data.wallets.map((w) => `  ${w.walletId}  ${w.label ?? ''}`) : ['  none']),
+          ].join('\n'));
+          return EXIT.OK;
+        }
+        if (action === 'digest') {
+          const sub = args[1] || 'show';
+          const describe = (s) => s
+            ? `Goals report ${s.active ? 'on' : 'off'} · ${s.cadence ?? 'weekly'} at ${String(s.hour).padStart(2, '0')}:00 ${s.timezone} · to ${s.recipients.join(', ')}${s.nextRunAt ? ` · next ${s.nextRunAt}` : ''}`
+            : 'Goals report email is off. Turn it on: coinpay finances goals digest on --cadence monthly';
+          if (sub === 'show') { const s = await api.getGoalsDigest(client); emit({ schedule: s }, describe(s)); return EXIT.OK; }
+          if (sub === 'on') {
+            const s = await api.setGoalsDigest(client, {
+              cadence: typeof flags.cadence === 'string' ? flags.cadence : undefined,
+              hour: flags.hour !== undefined ? Number(flags.hour) : undefined,
+              timezone: typeof flags.timezone === 'string' ? flags.timezone : Intl.DateTimeFormat().resolvedOptions().timeZone,
+              recipients: flags.to ? listFlag(flags.to) : undefined,
+            });
+            emit({ schedule: s }, describe(s));
+            return EXIT.OK;
+          }
+          if (sub === 'off') { const d = await api.deleteGoalsDigest(client); emit(d, 'Goals report email turned off.'); return EXIT.OK; }
+          if (sub === 'send-now') {
+            const d = await api.sendGoalsDigestNow(client);
+            emit(d, `Sent the ${d.period} goals report to ${d.sent.join(', ') || 'nobody'}${d.failed.length ? `; failed: ${d.failed.map((f) => `${f.to} (${f.error})`).join(', ')}` : ''}`);
+            return d.sent.length > 0 ? EXIT.OK : EXIT.FAILURE;
+          }
+          throw new CliExit(EXIT.INVALID, usage);
+        }
+        if (action === 'archive') {
+          const g = await api.updateGoal(client, await resolveId(args[1]), { archived: true });
+          emit({ goal: g }, `Archived ${g.name}.`);
+          return EXIT.OK;
+        }
+        if (action === 'delete') {
+          const id = await resolveId(args[1]);
+          if (!flags.yes) throw new CliExit(EXIT.INVALID, 'This deletes the goal and its recorded contributions. Re-run with --yes to confirm.');
+          const d = await api.deleteGoal(client, id);
+          emit(d, 'Goal deleted.');
+          return EXIT.OK;
+        }
+        throw new CliExit(EXIT.INVALID, usage);
+      }
+
       case 'due-day': {
         const id = args[0];
         const value = args[1];
@@ -1056,4 +1176,4 @@ export async function runFinancesCommand(subcommand, args, flags, ctx) {
   }
 }
 
-export const EXTENDED_SUBCOMMANDS = ['connect', 'disconnect', 'consent', 'backfill', 'jobs', 'coverage', 'report', 'reports', 'statements', 'books', 'pnl', 'profit-loss', 'payloads', 'digest', 'due', 'due-soon', 'recurring', 'due-day', 'daily', 'costs'];
+export const EXTENDED_SUBCOMMANDS = ['connect', 'disconnect', 'consent', 'backfill', 'jobs', 'coverage', 'report', 'reports', 'statements', 'books', 'pnl', 'profit-loss', 'payloads', 'digest', 'due', 'due-soon', 'recurring', 'due-day', 'daily', 'costs', 'goals', 'goal'];

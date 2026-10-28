@@ -530,3 +530,72 @@ export async function setAccountDueDay(client, accountId, { day, amount } = {}) 
   const data = await call(client, `/finances/accounts/${encodeURIComponent(accountId)}`, { method: 'PATCH', body: JSON.stringify(body) });
   return data.account;
 }
+
+/**
+ * Finance goals: saving toward something or paying something off, by a
+ * deadline. Progress follows linked finance accounts and web wallets, or
+ * contributions recorded by hand. Records only; nothing moves money.
+ */
+export async function listGoals(client, { archived = false } = {}) {
+  return call(client, `/finances/goals${archived ? '?archived=1' : ''}`);
+}
+
+export async function getGoal(client, id) {
+  return call(client, `/finances/goals/${encodeURIComponent(id)}`);
+}
+
+/** `{ name, kind, targetAmount, deadline, currency?, startDate?, startingAmount?, linkedAccountIds?, linkedWalletIds?, notes? }` */
+export async function createGoal(client, goal) {
+  const data = await call(client, '/finances/goals', { method: 'POST', body: JSON.stringify(goal) });
+  return data.goal;
+}
+
+export async function updateGoal(client, id, patch) {
+  const data = await call(client, `/finances/goals/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  return data.goal;
+}
+
+export async function deleteGoal(client, id) {
+  return call(client, `/finances/goals/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** Record an amount toward a goal (negative = withdrawal). `occurredOn` defaults to today. */
+export async function addGoalContribution(client, id, { amount, occurredOn, note } = {}) {
+  const data = await call(client, `/finances/goals/${encodeURIComponent(id)}/contributions`, {
+    method: 'POST',
+    body: JSON.stringify({ amount, occurredOn, note }),
+  });
+  return data.contribution;
+}
+
+/** What a goal can be linked to: finance accounts and CoinPay web wallets. */
+export async function getGoalSources(client) {
+  return call(client, '/finances/goals/sources');
+}
+
+/** The daily, weekly, monthly or quarterly goals report: `{ report, text }`. */
+export async function getGoalsReport(client, { period = 'weekly' } = {}) {
+  return call(client, `/finances/goals/report?period=${encodeURIComponent(period)}`);
+}
+
+export async function getGoalsDigest(client) {
+  const data = await call(client, '/finances/email-schedules?kind=goals_digest');
+  return data.schedule;
+}
+
+/** Turn the goals report email on at a cadence (daily, weekly, monthly, quarterly). */
+export async function setGoalsDigest(client, { cadence, hour, timezone, recipients, active = true } = {}) {
+  const data = await call(client, '/finances/email-schedules', {
+    method: 'POST',
+    body: JSON.stringify({ kind: 'goals_digest', cadence, hour, timezone, recipients, active }),
+  });
+  return data.schedule;
+}
+
+export async function deleteGoalsDigest(client) {
+  return call(client, '/finances/email-schedules?kind=goals_digest', { method: 'DELETE' });
+}
+
+export async function sendGoalsDigestNow(client) {
+  return call(client, '/finances/email-schedules/send-now?kind=goals_digest', { method: 'POST', body: '{}' });
+}

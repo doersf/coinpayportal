@@ -5,6 +5,24 @@ All notable changes to `@profullstack/coinpay` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-10-28
+
+### Added
+- Finance goals: save for a house or a car, build an emergency fund, or pay off a debt, by a deadline.
+  `coinpay finances goals create --name "Down payment" --kind house --target 60000 --deadline 2031-06-30`
+  (`--account <id>` / `--wallet <id>` link real balances; `--start-amount` is what is already saved, or
+  the debt at the start of a payoff goal); `goals list|show|contribute <id> <amount>|sources|archive|delete`.
+  Each goal says on track, behind, achieved or past deadline, and what it takes per day/week/month/quarter
+  to finish on time.
+- `coinpay finances goals report --period daily|weekly|monthly|quarterly`: each goal's change over the
+  trailing period, what the period needed to stay on schedule, and the pace.
+- `coinpay finances goals digest on --cadence monthly`: the opt-in goals report email (daily, weekly,
+  monthly on the 1st, quarterly on Jan/Apr/Jul/Oct 1st); `digest show|off|send-now`.
+- SDK `listGoals`, `getGoal`, `createGoal`, `updateGoal`, `deleteGoal`, `addGoalContribution`,
+  `getGoalSources`, `getGoalsReport`, `getGoalsDigest`, `setGoalsDigest`, `deleteGoalsDigest`,
+  `sendGoalsDigestNow`; MCP `finance_goals`, `finance_goal_create`, `finance_goal_contribute`,
+  `finance_goals_report`, `finance_goals_digest`. Not financial advice; nothing moves money.
+
 ## [0.26.0] - 2026-10-28
 
 ### Added

@@ -31,6 +31,15 @@ describe('handleMessage', () => {
     expect(TOOLS.every((t) => typeof t.handler === 'function')).toBe(true);
   });
 
+  it('goal tools hit the goals API', async () => {
+    const calls = [];
+    const client = { request: async (endpoint, options = {}) => { calls.push([options.method || 'GET', endpoint]); return endpoint.includes('report') ? { report: {}, text: 'Monthly goals report' } : { goal: { id: 'g' }, goals: [] }; } };
+    const report = await handleMessage({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'finance_goals_report', arguments: { period: 'monthly' } } }, ctx(client));
+    expect(report.result.content[0].text).toBe('Monthly goals report');
+    await handleMessage({ jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'finance_goal_create', arguments: { name: 'Car', kind: 'car', targetAmount: 20000, deadline: '2028-01-01' } } }, ctx(client));
+    expect(calls).toEqual([['GET', '/finances/goals/report?period=monthly'], ['POST', '/finances/goals']]);
+  });
+
   it('calls the API through the client and returns JSON text', async () => {
     const calls = [];
     const client = { request: async (endpoint) => { calls.push(endpoint); return { months: ['2026-10'], accounts: [], missing: 0, fetchers: [] }; } };

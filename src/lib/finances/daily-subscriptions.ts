@@ -351,7 +351,7 @@ export async function maybeBackfillDefaultSchedules(now: Date = new Date()): Pro
  * it was the last one the schedule is deleted and the opt-out recorded, so it
  * is never re-created automatically. Idempotent: a second click is a no-op.
  */
-export async function unsubscribeSchedule(merchantId: string, kind: DefaultKind | 'business_report', email: string): Promise<'unsubscribed' | 'removed_recipient' | 'already'> {
+export async function unsubscribeSchedule(merchantId: string, kind: DefaultKind | 'business_report' | 'goals_digest', email: string): Promise<'unsubscribed' | 'removed_recipient' | 'already'> {
   const { getSchedule } = await import('./schedules');
   const supabase = getSupabaseAdmin();
   const address = email.trim().toLowerCase();
@@ -368,7 +368,7 @@ export async function unsubscribeSchedule(merchantId: string, kind: DefaultKind 
     await audit(merchantId, `${kind}.unsubscribe`, 'schedule', schedule.id, { removed: 1, remaining: remaining.length });
     return 'removed_recipient';
   }
-  if (kind === 'business_report') {
+  if (kind === 'business_report' || kind === 'goals_digest') {
     // Opt-in: nothing re-creates it, so there is no opt-out to remember.
     if (!schedule) return 'already';
   } else {

@@ -10,7 +10,7 @@ export const maxDuration = 120;
 /**
  * POST /api/finances/email-schedules/send-now — send a scheduled email
  * immediately, as a test or on demand. `?kind=daily_summary` sends the daily
- * summary, `?kind=business_report` the business report; the default is the
+ * summary, `?kind=business_report` the business report, `?kind=goals_digest` the goals report; the default is the
  * weekly digest.
  */
 export async function POST(req: NextRequest) {
@@ -21,6 +21,12 @@ export async function POST(req: NextRequest) {
   try {
     const schedule = await getSchedule(guard.id, kind);
     if (!schedule) return financeError('not_found', `No ${kind.replace('_', ' ')} is configured yet`, 404);
+    if (kind === 'goals_digest') {
+      const { sendGoalsDigest } = await import('@/lib/finances/goals-digest');
+      const goals = await sendGoalsDigest(schedule);
+      if (goals.sent.length > 0) await markDigestSent(schedule.id);
+      return financeJson(goals, goals.sent.length > 0 ? 200 : 502);
+    }
     if (kind === 'business_report') {
       const { sendBusinessReport } = await import('@/lib/finances/business-report');
       const biz = await sendBusinessReport(schedule);

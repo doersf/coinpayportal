@@ -465,3 +465,59 @@ export function setDailySummary(
 export function deleteDailySummary(client: CoinPayClient): Promise<{ success: boolean }>;
 export function sendDailySummaryNow(client: CoinPayClient): Promise<{ sent: string[]; failed: Array<{ to: string; error: string }>; due: number; overdue: number }>;
 export function setAccountDueDay(client: CoinPayClient, accountId: string, opts: { day: number | null; amount?: number | string | null }): Promise<Record<string, unknown>>;
+
+export type GoalKind = 'house' | 'car' | 'emergency_fund' | 'debt_payoff' | 'custom';
+export type GoalPeriod = 'daily' | 'weekly' | 'monthly' | 'quarterly';
+export type GoalStatus = 'achieved' | 'on_track' | 'behind' | 'overdue';
+export interface GoalSnapshot {
+  progress: number;
+  remaining: number;
+  percent: number;
+  expectedByNow: number;
+  status: GoalStatus;
+  daysLeft: number;
+  required: { perDay: number; perWeek: number; perMonth: number; perQuarter: number };
+  recentPerMonth: number | null;
+  projectedDate: string | null;
+  exact: boolean;
+}
+export interface FinanceGoal {
+  id: string;
+  name: string;
+  kind: GoalKind;
+  targetAmount: number;
+  currency: string;
+  startDate: string;
+  deadline: string;
+  startingAmount: number | null;
+  startProgress: number;
+  linkedAccountIds: string[];
+  linkedWalletIds: string[];
+  notes: string | null;
+  direction: 'save' | 'payoff';
+  snapshot: GoalSnapshot;
+}
+export interface GoalInput {
+  name: string;
+  kind: GoalKind;
+  targetAmount?: number | string;
+  deadline: string;
+  currency?: string;
+  startDate?: string;
+  startingAmount?: number | string | null;
+  linkedAccountIds?: string[];
+  linkedWalletIds?: string[];
+  notes?: string | null;
+}
+export function listGoals(client: CoinPayClient, opts?: { archived?: boolean }): Promise<{ goals: FinanceGoal[]; timezone: string; disclaimer: string }>;
+export function getGoal(client: CoinPayClient, id: string): Promise<{ goal: FinanceGoal; contributions: Array<{ id: string; amount: number; occurredOn: string; note: string | null }> }>;
+export function createGoal(client: CoinPayClient, goal: GoalInput): Promise<FinanceGoal>;
+export function updateGoal(client: CoinPayClient, id: string, patch: Partial<GoalInput> & { archived?: boolean; startProgress?: number }): Promise<FinanceGoal>;
+export function deleteGoal(client: CoinPayClient, id: string): Promise<{ success: boolean }>;
+export function addGoalContribution(client: CoinPayClient, id: string, c: { amount: number | string; occurredOn?: string; note?: string }): Promise<{ id: string; amount: number; occurredOn: string; note: string | null }>;
+export function getGoalSources(client: CoinPayClient): Promise<{ accounts: Array<{ id: string; name: string; institution: string | null; liability: boolean; currency: string; balance: number | null }>; wallets: Array<{ walletId: string; label: string | null }> }>;
+export function getGoalsReport(client: CoinPayClient, opts?: { period?: GoalPeriod }): Promise<{ report: Record<string, unknown>; text: string }>;
+export function getGoalsDigest(client: CoinPayClient): Promise<(WeeklyDigest & { cadence?: GoalPeriod }) | null>;
+export function setGoalsDigest(client: CoinPayClient, opts?: { cadence?: GoalPeriod; hour?: number; timezone?: string; recipients?: string[]; active?: boolean }): Promise<WeeklyDigest & { cadence?: GoalPeriod }>;
+export function deleteGoalsDigest(client: CoinPayClient): Promise<{ success: boolean }>;
+export function sendGoalsDigestNow(client: CoinPayClient): Promise<{ sent: string[]; failed: Array<{ to: string; error: string }>; goals: number; period: GoalPeriod }>;

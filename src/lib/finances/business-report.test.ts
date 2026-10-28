@@ -182,7 +182,7 @@ describe('opt-in, off by default', () => {
     await subs.backfillDefaultSchedules('daily_summary', { now: NOW });
     await subs.ensureDefaultReports(A);
     expect(subs.DEFAULT_KINDS).not.toContain('business_report');
-    expect(OPT_IN_KINDS).toEqual(['business_report']);
+    expect(OPT_IN_KINDS).toEqual(['business_report', 'goals_digest']);
     expect(bizRows()).toEqual([]);
     expect(await getSchedule(A, 'business_report')).toBeNull();
   });

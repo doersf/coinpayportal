@@ -728,6 +728,10 @@ ${colors.cyan}Commands:${colors.reset}
                             toCoinPayCosts rows (--source opendevice, --header "K: V" for a URL)
     due-day <id> <1-31|clear>  A card/loan's statement due day (--amount 810.46, or balance)
     daily [show|on|off|send-now]  Daily summary email: spend vs target, top cuts, due soon, position (--hour 7 --to …, --target 100)
+    goals [list|show|create|contribute|report|digest|sources|archive|delete]
+                            Savings and payoff goals (house, car, emergency fund, debt) by a deadline;
+                            progress from linked accounts/wallets or recorded contributions.
+                            report --period daily|weekly|monthly|quarterly · digest on --cadence monthly
 
   ${colors.bright}escrow${colors.reset}
     create                Create a new escrow
@@ -5258,7 +5262,9 @@ async function handleFinances(subcommand, args, flags) {
     case 'recurring':
     case 'due-day':
     case 'daily':
-    case 'costs': {
+    case 'costs':
+    case 'goals':
+    case 'goal': {
       const { client } = financesClient();
       const { runFinancesCommand } = await import('../src/finances-commands.js');
       const code = await runFinancesCommand(subcommand, args, flags, {
@@ -5272,7 +5278,7 @@ async function handleFinances(subcommand, args, flags) {
 
     default:
       print.error(`Unknown finances command: ${subcommand}`);
-      console.log('Usage: coinpay finances [tui|summary|accounts|ledger|connections|sync|connect|disconnect|backfill|jobs|coverage|report|reports|statements|books|pnl|payloads|digest|due|recurring|due-day|daily|costs]');
+      console.log('Usage: coinpay finances [tui|summary|accounts|ledger|connections|sync|connect|disconnect|backfill|jobs|coverage|report|reports|statements|books|pnl|payloads|digest|due|recurring|due-day|daily|costs|goals]');
       process.exit(1);
   }
 }

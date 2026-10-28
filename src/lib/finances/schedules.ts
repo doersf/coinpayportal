@@ -1,6 +1,7 @@
 import 'server-only';
 import { getSupabaseAdmin } from '../supabase/server';
 import { isValidTimeZone, zonedMidnight, wallClock, localDate, addDays } from './periods';
+import { nextCadenceRun } from './goals';
 import { normalizeRecipients, sendBooksEmail, sendReportEmail, resolveBooksSelection, renderBooksFormat, booksEmailBlock, EmailingError, type SendOutcome } from './emailing';
 import { booksSummary } from './books';
 import type { EmailAttachment } from '../email';
@@ -34,15 +35,17 @@ import { escapeHtml } from './render';
  * those, never from the server clock's day.
  */
 
-export type ScheduleKind = 'weekly_digest' | 'daily_summary' | 'weekly_payments' | 'business_report';
-export const SCHEDULE_KINDS: ScheduleKind[] = ['weekly_digest', 'daily_summary', 'weekly_payments', 'business_report'];
+export type ScheduleKind = 'weekly_digest' | 'daily_summary' | 'weekly_payments' | 'business_report' | 'goals_digest';
+export const SCHEDULE_KINDS: ScheduleKind[] = ['weekly_digest', 'daily_summary', 'weekly_payments', 'business_report', 'goals_digest'];
 
 /**
  * Opt-in reports: off until the owner turns one on, never created by a
  * backfill, and nothing remembers an opt-out when it is turned off. Only the
- * business report so far (`business-report.ts`).
+ * business report (`business-report.ts`) and the goals report
+ * (`goals-digest.ts`), which runs on a `cadence` (daily, weekly, monthly or
+ * quarterly) instead of a weekday list.
  */
-export const OPT_IN_KINDS: ScheduleKind[] = ['business_report'];
+export const OPT_IN_KINDS: ScheduleKind[] = ['business_report', 'goals_digest'];
 
 /** The default reports carry an opt-out; opt-in ones have nothing to remember. */
 function isDefaultReport(kind: ScheduleKind): kind is 'weekly_digest' | 'daily_summary' | 'weekly_payments' {
@@ -59,7 +62,11 @@ const KIND_DEFAULTS: Record<ScheduleKind, { weekdays: number[]; hour: number; sc
   daily_summary: { weekdays: [0, 1, 2, 3, 4, 5, 6], hour: 7, scope: 'all', formats: ['html'] },
   weekly_payments: { weekdays: [1, 5], hour: 8, scope: 'all', formats: ['html'] },
   business_report: { weekdays: [1], hour: 8, scope: 'business', formats: ['html'] },
+  goals_digest: { weekdays: [1], hour: 8, scope: 'all', formats: ['html'] },
 };
+
+export type Cadence = 'daily' | 'weekly' | 'monthly' | 'quarterly';
+const CADENCES: Cadence[] = ['daily', 'weekly', 'monthly', 'quarterly'];
 
 export interface EmailScheduleRow {
   id: string;
@@ -72,13 +79,15 @@ export interface EmailScheduleRow {
   scope: 'business' | 'personal' | 'all';
   formats: string[];
   active: boolean;
+  /** Goals report only: how often it goes out. Null for weekday schedules. */
+  cadence?: Cadence | null;
   last_sent_at: string | null;
   next_run_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
-const COLUMNS = 'id, merchant_id, kind, weekdays, hour, timezone, recipients, scope, formats, active, last_sent_at, next_run_at, created_at, updated_at';
+const COLUMNS = 'id, merchant_id, kind, weekdays, hour, timezone, recipients, scope, formats, active, cadence, last_sent_at, next_run_at, created_at, updated_at';
 
 export class ScheduleError extends Error {
   code: string;
@@ -114,6 +123,19 @@ export function nextRunAt(weekdays: number[], hour: number, timeZone: string, no
   throw new ScheduleError('internal_error', 'Could not compute the next run', 500);
 }
 
+/**
+ * The next run of any schedule: a cadence schedule (the goals report) goes
+ * out daily, weekly on its first weekday, on the 1st of each month, or on the
+ * 1st of each quarter; everything else uses its weekday list.
+ */
+export function nextRunFor(row: Pick<EmailScheduleRow, 'weekdays' | 'hour' | 'timezone' | 'cadence'>, now: Date = new Date()): Date {
+  if (!row.cadence) return nextRunAt(row.weekdays, row.hour, row.timezone, now);
+  return nextCadenceRun(row.cadence, row.hour, row.weekdays[0] ?? 1, now, localDate(now, row.timezone), (date, hour) => {
+    const [y, m, d] = date.split('-').map(Number);
+    return new Date(zonedMidnight(y, m, d, row.timezone).getTime() + hour * 3_600_000);
+  });
+}
+
 export function toPublicSchedule(row: EmailScheduleRow) {
   return {
     id: row.id,
@@ -125,6 +147,7 @@ export function toPublicSchedule(row: EmailScheduleRow) {
     scope: row.scope,
     formats: row.formats,
     active: row.active,
+    ...(row.cadence ? { cadence: row.cadence } : {}),
     lastSentAt: row.last_sent_at,
     nextRunAt: row.next_run_at,
     createdAt: row.created_at,
@@ -145,7 +168,7 @@ export async function getSchedule(merchantId: string, kind: ScheduleKind = 'week
 
 export async function upsertSchedule(
   merchantId: string,
-  input: { weekdays?: unknown; hour?: unknown; timezone?: unknown; recipients?: unknown; scope?: unknown; formats?: unknown; active?: unknown },
+  input: { weekdays?: unknown; hour?: unknown; timezone?: unknown; recipients?: unknown; scope?: unknown; formats?: unknown; active?: unknown; cadence?: unknown },
   defaults: { timezone: string; email: string },
   kind: ScheduleKind = 'weekly_digest',
 ): Promise<EmailScheduleRow> {
@@ -169,12 +192,20 @@ export async function upsertSchedule(
     : (Array.isArray(input.formats) ? input.formats : []).map(String).filter((f) => ['pdf', 'csv', 'html', 'json'].includes(f));
   if (formats.length === 0) throw new ScheduleError('invalid_request', 'formats must be among pdf, csv, html, json', 400);
   const active = input.active === undefined ? existing?.active ?? true : input.active === true;
-  const next = active ? nextRunAt(weekdays, hour, timezone).toISOString() : null;
+  let cadence: Cadence | null = null;
+  if (kind === 'goals_digest') {
+    const raw = input.cadence === undefined ? existing?.cadence ?? 'weekly' : input.cadence;
+    if (!CADENCES.includes(raw as Cadence)) throw new ScheduleError('invalid_request', 'cadence must be daily, weekly, monthly or quarterly', 400);
+    cadence = raw as Cadence;
+  } else if (input.cadence !== undefined) {
+    throw new ScheduleError('invalid_request', 'cadence applies to the goals report only', 400);
+  }
+  const next = active ? nextRunFor({ weekdays, hour, timezone, cadence }).toISOString() : null;
 
   const { data, error } = await supabase
     .from('finance_email_schedules')
     .upsert(
-      { merchant_id: merchantId, kind, weekdays, hour, timezone, recipients, scope, formats, active, next_run_at: next, updated_at: new Date().toISOString() },
+      { merchant_id: merchantId, kind, weekdays, hour, timezone, recipients, scope, formats, active, cadence, next_run_at: next, updated_at: new Date().toISOString() },
       { onConflict: 'merchant_id,kind' },
     )
     .select(COLUMNS)
@@ -464,7 +495,7 @@ export async function enqueueScheduledEmails(now: Date = new Date()): Promise<nu
   let created = 0;
   for (const raw of data ?? []) {
     const row = raw as EmailScheduleRow;
-    const next = nextRunAt(row.weekdays, row.hour, row.timezone, now).toISOString();
+    const next = nextRunFor(row, now).toISOString();
     await supabase.from('finance_email_schedules').update({ next_run_at: next, updated_at: now.toISOString() }).eq('id', row.id);
     await createJob({
       merchantId: row.merchant_id,

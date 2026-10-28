@@ -15,8 +15,8 @@ import { requireEncryptionKey } from '../crypto/require-key';
  * constant fallback).
  */
 
-export type UnsubscribeKind = 'daily_summary' | 'weekly_digest' | 'weekly_payments' | 'business_report';
-const KINDS: readonly string[] = ['daily_summary', 'weekly_digest', 'weekly_payments', 'business_report'];
+export type UnsubscribeKind = 'daily_summary' | 'weekly_digest' | 'weekly_payments' | 'business_report' | 'goals_digest';
+const KINDS: readonly string[] = ['daily_summary', 'weekly_digest', 'weekly_payments', 'business_report', 'goals_digest'];
 
 export interface UnsubscribeClaim {
   merchantId: string;
