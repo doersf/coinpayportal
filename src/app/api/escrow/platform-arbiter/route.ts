@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getMnemonic } from '@/lib/secrets';
 import { deriveKeyForChain } from '@/lib/web-wallet/keys';
 import { PLATFORM_ARBITER_DERIVATION_INDEX } from '@/lib/wallets/derivation-family';
+import { isRetiredMnemonic } from '@/lib/wallets/key-generation';
 
 function getSystemMnemonic(chain: string): string | undefined {
   // Try exact chain first (e.g. SYSTEM_MNEMONIC_USDC_ETH), then fall back to COINPAY_MNEMONIC
@@ -31,7 +32,8 @@ export async function GET(request: NextRequest) {
   }
 
   const mnemonic = getSystemMnemonic(chain);
-  if (!mnemonic) {
+  if (!mnemonic || isRetiredMnemonic(mnemonic)) {
+    // A retired (leaked) seed must never hand out an arbiter key for a new escrow.
     return NextResponse.json({ error: `Platform arbiter key not configured for ${chain}` }, { status: 503 });
   }
 
