@@ -36,6 +36,7 @@ import {
   acquireFamilyIndex,
   bumpFamilyIndex,
 } from './derivation-family';
+import { assertMnemonicNotRetired, getSystemKeyGeneration } from './key-generation';
 
 /**
  * Supported blockchains
@@ -180,6 +181,9 @@ function getSystemMnemonic(cryptocurrency: SystemBlockchain): string {
   if (!validateMnemonic(mnemonic, wordlist)) {
     throw new Error(`Invalid system mnemonic for ${cryptocurrency}`);
   }
+
+  // Fail closed on a leaked generation (e.g. a restored env backup).
+  assertMnemonicNotRetired(mnemonic, cryptocurrency);
 
   return mnemonic;
 }
@@ -875,6 +879,7 @@ export async function generatePaymentAddress(
 
     // Derive the payment address
     const derivedAddress = await deriveSystemPaymentAddress(cryptocurrency, nextIndex);
+    const keyGeneration = getSystemKeyGeneration();
 
     // Encrypt the private key for storage
     // Guarded, not just present — this is the system custody path.
@@ -923,6 +928,7 @@ export async function generatePaymentAddress(
           address: finalAddress,
           derivation_index: finalIndex,
           derivation_path: derivedAddress.derivationPath,
+          key_generation: keyGeneration,
           encrypted_private_key: finalPrivateKey,
           merchant_wallet: merchantWallet,
           commission_wallet: commissionWallet,

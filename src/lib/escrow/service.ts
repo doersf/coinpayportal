@@ -20,6 +20,7 @@
  */
 
 import { acquireFamilyIndex } from '../wallets/derivation-family';
+import { getSystemKeyGeneration } from '../wallets/key-generation';
 import { tryRequireEncryptionKey } from '@/lib/crypto/require-key';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { randomBytes } from 'crypto';
@@ -454,6 +455,7 @@ async function generateEscrowAddress(
         address: derived.address,
         derivation_index: nextIndex,
         derivation_path: derived.derivationPath,
+        key_generation: getSystemKeyGeneration(),
         encrypted_private_key: encryptedPrivateKey,
         merchant_wallet: beneficiaryWallet,
         commission_wallet: commissionWallet,
