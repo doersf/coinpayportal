@@ -1,4 +1,5 @@
 import 'server-only';
+import { randomUUID } from 'crypto';
 import { getSupabaseAdmin } from '../supabase/server';
 import { listAccounts, type AccountView } from './summary';
 import { localDate } from './periods';
@@ -223,8 +224,8 @@ export async function createGoal(merchantId: string, body: Record<string, unknow
   // Where the goal starts: a linked savings account already holding money
   // starts there, and a payoff goal with no stated debt starts at what the
   // linked accounts owe now.
-  const probe: Goal = { ...draft, id: 'new', startProgress: 0, archivedAt: null, achievedAt: null, createdAt: new Date().toISOString() };
-  const inputs = (await loadInputs(merchantId, [probe], new Date())).get('new')!;
+  const probe: Goal = { ...draft, id: randomUUID(), startProgress: 0, archivedAt: null, achievedAt: null, createdAt: new Date().toISOString() };
+  const inputs = (await loadInputs(merchantId, [probe], new Date())).get(probe.id)!;
   if (draft.kind === 'debt_payoff' && draft.startingAmount === null && draft.linkedAccountIds.length > 0) {
     const owed = inputs.accounts.filter((a) => a.currency === draft.currency).reduce((s, a) => s + (a.current ?? 0), 0);
     if (owed <= 0) throw new GoalError('The linked accounts owe nothing right now; set startingAmount to the debt you are paying off');
