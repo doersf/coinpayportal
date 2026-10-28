@@ -420,14 +420,43 @@ export interface DueSoon {
   missed: Array<{ payee: string; amount: number; expectedOn: string; lastSeen: string; accountName: string }>;
   totals: { due: number; overdue: number; unpriced: number };
   recurring: {
-    charges: Array<{ payee: string; amount: number; cadence: string; occurrences: number; lastSeen: string; nextExpected: string; monthlyEquivalent: number; scope: 'business' | 'personal'; isDebtService: boolean; accountId: string; accountName: string }>;
+    charges: Array<{ key: string; payee: string; amount: number; cadence: string; occurrences: number; lastSeen: string; nextExpected: string; monthlyEquivalent: number; scope: 'business' | 'personal'; isDebtService: boolean; accountId: string; accountName: string; origin?: 'observed' | 'matched' | 'declared'; declared?: DeclaredCostRef }>;
     monthlyTotal: number;
     monthlyDebtService: number;
+    /** The declared part of monthlyTotal that no feed shows. */
+    monthlyDeclared?: number;
+    declaredSkipped?: number;
   };
   currency: string | null;
 }
 
 export function getDueSoon(client: CoinPayClient, opts?: { days?: number; timezone?: string }): Promise<DueSoon>;
+
+export interface DeclaredCostRef {
+  source: string;
+  key: string;
+  payee: string;
+  amount: number;
+  cadence: 'monthly' | 'yearly';
+  monthlyEquivalent: number;
+  category: string | null;
+  paidWith: string | null;
+  meta: Record<string, unknown>;
+}
+
+export interface DeclaredCost extends DeclaredCostRef {
+  currency: string;
+  scope: 'business' | 'personal';
+  nextExpected: string | null;
+  updatedAt?: string | null;
+}
+
+export function listDeclaredCosts(client: CoinPayClient, opts?: { source?: string }): Promise<{ costs: DeclaredCost[]; monthly: Record<string, number> }>;
+export function importDeclaredCosts(
+  client: CoinPayClient,
+  body: unknown,
+  opts?: { source?: string },
+): Promise<{ source: string; removed: number; upserted: number; costs: DeclaredCost[]; monthly: Record<string, number> }>;
 export function getDailySummary(client: CoinPayClient): Promise<WeeklyDigest | null>;
 export function setDailySummary(
   client: CoinPayClient,

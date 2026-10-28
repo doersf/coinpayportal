@@ -520,11 +520,15 @@ export async function getSummary(
     }
   }
 
+  // Costs the owner declared (servers paid by PayPal or crypto, which no
+  // feed shows) join the detected recurring charges, matched ones once.
+  const { declaredCostsForPosition } = await import('./declared-costs-store');
   const position = buildPosition({
     accounts,
     transactions: positionRows,
     lookbackDays,
     now,
+    declared: await declaredCostsForPosition(merchantId),
   });
 
   // --- corpus extent --------------------------------------------------------

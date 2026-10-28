@@ -36,6 +36,7 @@ type RecurringCharge = {
   scope: 'business' | 'personal';
   isDebtService: boolean;
   accountName: string;
+  origin?: 'observed' | 'matched' | 'declared';
 };
 
 type DueSoon = {
@@ -275,7 +276,7 @@ export default function DueSoonSection({
               </thead>
               <tbody>
                 {[...data.recurring.charges]
-                  .sort((a, b) => a.nextExpected.localeCompare(b.nextExpected))
+                  .sort((a, b) => (a.nextExpected || '9999').localeCompare(b.nextExpected || '9999'))
                   .map((c, i) => (
                     <tr key={`${c.payee}:${i}`} className="border-t border-slate-800/60">
                       <td className="px-4 py-2">
@@ -283,13 +284,14 @@ export default function DueSoonSection({
                         <div className="text-xs text-gray-500">
                           {c.accountName} · {c.scope}
                           {c.isDebtService ? ' · debt payment' : ''}
+                          {c.origin === 'declared' ? ' · declared, not in any feed' : c.origin === 'matched' ? ' · declared + seen' : ''}
                         </div>
                       </td>
                       <td className="px-4 py-2 text-gray-400">
-                        {c.cadence} · {c.occurrences}×
+                        {c.cadence}{c.origin === 'declared' ? '' : ` · ${c.occurrences}×`}
                       </td>
-                      <td className="px-4 py-2 text-gray-400 whitespace-nowrap">{formatDate(c.lastSeen)}</td>
-                      <td className="px-4 py-2 text-gray-300 whitespace-nowrap">{formatDate(c.nextExpected)}</td>
+                      <td className="px-4 py-2 text-gray-400 whitespace-nowrap">{c.origin === 'declared' ? '—' : formatDate(c.lastSeen)}</td>
+                      <td className="px-4 py-2 text-gray-300 whitespace-nowrap">{c.nextExpected ? formatDate(c.nextExpected) : '—'}</td>
                       <td className="px-4 py-2 text-right text-gray-200">{formatMoney(c.amount, currency)}</td>
                       <td className="px-4 py-2 text-right text-gray-400">{formatMoney(c.monthlyEquivalent, currency)}</td>
                     </tr>

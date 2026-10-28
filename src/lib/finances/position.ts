@@ -1,5 +1,6 @@
 import { type AccountKind } from './classify';
 import { isCardPayoff, isInvestmentBuy, isLoanPayment } from './spend-rules';
+import { mergeDeclaredCosts, type DeclaredCost, type DeclaredRef } from './declared-costs';
 
 /**
  * Debt against income: the basic-accounting view of a linked feed.
@@ -168,6 +169,15 @@ export interface RecurringCharge {
   /** The account it last posted to: the card it bills, or the account it leaves. */
   accountId: string;
   accountName: string;
+  /**
+   * Where the row comes from: `observed` (detected in the feed), `matched`
+   * (detected, and also declared: counted once, as observed) or `declared`
+   * (stated by the owner, e.g. an OpenDevice inventory, and never seen in
+   * the feed: no account, `occurrences` 0). Absent on older callers = observed.
+   */
+  origin?: 'observed' | 'matched' | 'declared';
+  /** The declaration behind a `matched` or `declared` row. */
+  declared?: DeclaredRef;
 }
 
 export interface ScopeFlow {
@@ -253,6 +263,10 @@ export interface Position {
     monthlyTotal: number;
     /** The debt-service part of that total. */
     monthlyDebtService: number;
+    /** The part of `monthlyTotal` that is declared and not seen in the feed. */
+    monthlyDeclared: number;
+    /** Declared costs left out because they are not in the primary currency. */
+    declaredSkipped: number;
   };
 
   scopes: ScopeFlow[];
@@ -423,11 +437,14 @@ export function buildPosition({
   transactions,
   lookbackDays,
   now = new Date(),
+  declared = [],
 }: {
   accounts: PositionAccount[];
   transactions: PositionTransaction[];
   lookbackDays: number;
   now?: Date;
+  /** Owner-declared recurring costs to merge with the detected ones (see declared-costs.ts). */
+  declared?: DeclaredCost[];
 }): Position {
   const currency = accounts[0]?.currency ?? null;
 
@@ -666,10 +683,16 @@ export function buildPosition({
 
   // ── Recurring ──
 
-  const charges = detectRecurring(
-    rows.map((r) => ({ tx: r.tx, account: r.account, scope: r.scope, isLiability: r.isLiability })),
-    now,
+  const merged = mergeDeclaredCosts(
+    detectRecurring(
+      rows.map((r) => ({ tx: r.tx, account: r.account, scope: r.scope, isLiability: r.isLiability })),
+      now,
+    ),
+    declared,
+    { now, currency: currency ?? declared[0]?.currency ?? null },
   );
+  const charges = merged.charges;
+  const recurringDeclared = charges.filter((c) => c.origin === 'declared').reduce((t, c) => t + c.monthlyEquivalent, 0);
   const recurringMonthly = charges.reduce((t, c) => t + c.monthlyEquivalent, 0);
   const recurringDebt = charges.filter((c) => c.isDebtService).reduce((t, c) => t + c.monthlyEquivalent, 0);
 
@@ -720,6 +743,8 @@ export function buildPosition({
       charges,
       monthlyTotal: round2(recurringMonthly),
       monthlyDebtService: round2(recurringDebt),
+      monthlyDeclared: round2(recurringDeclared),
+      declaredSkipped: merged.skipped.length,
     },
     scopes: [...scopeMap.values()].sort((a, b) => b.assets + b.debt - (a.assets + a.debt)),
     confidence: {
