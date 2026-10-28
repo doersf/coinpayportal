@@ -270,7 +270,7 @@ const BOOLEAN_FLAGS = new Set([
  * Parse command line arguments
  */
 // Flags that may be given more than once collect into an array.
-const REPEATABLE_FLAGS = new Set(['item']);
+const REPEATABLE_FLAGS = new Set(['item', 'header']);
 
 function parseArgs(args) {
   const result = { command: null, subcommand: null, args: [], flags: {} };
@@ -722,6 +722,10 @@ ${colors.cyan}Commands:${colors.reset}
     digest [show|set|off|send-now]  Weekly digest email (--days mon,fri --hour 8 --to …)
     due [--days 7]        What is due and overdue across every account (--days up to 60)
     recurring             Every recurring charge detected, with next date and monthly cost
+                            (origin: observed, declared, or matched = both, counted once)
+    costs [list|import|clear]  Declared recurring costs no feed shows (servers paid by PayPal/crypto):
+                            import <file|url> takes an OpenDevice inventory or @profullstack/fleet
+                            toCoinPayCosts rows (--source opendevice, --header "K: V" for a URL)
     due-day <id> <1-31|clear>  A card/loan's statement due day (--amount 810.46, or balance)
     daily [show|on|off|send-now]  Daily summary email: spend vs target, top cuts, due soon, position (--hour 7 --to …, --target 100)
 
@@ -5000,10 +5004,10 @@ function printPosition(position, fmt, { heading = false, detail = false } = {}) 
       { title: 'Amount', align: 'right', render: (c) => money(c.amount, cur) },
       { title: 'Every', align: 'left', render: (c) => c.cadence },
       { title: 'Seen', align: 'right', render: (c) => String(c.occurrences) },
-      { title: 'Last', align: 'left', render: (c) => c.lastSeen.slice(0, 10) },
-      { title: 'Next', align: 'left', render: (c) => c.nextExpected.slice(0, 10) },
+      { title: 'Last', align: 'left', render: (c) => (c.origin === 'declared' ? '-' : c.lastSeen.slice(0, 10)) },
+      { title: 'Next', align: 'left', render: (c) => (c.nextExpected || '-').slice(0, 10) },
       { title: 'Per month', align: 'right', render: (c) => money(c.monthlyEquivalent, cur) },
-      { title: 'Kind', align: 'left', render: (c) => (c.isDebtService ? 'debt' : 'bill') },
+      { title: 'Kind', align: 'left', render: (c) => (c.isDebtService ? 'debt' : c.origin === 'declared' ? 'declared' : c.origin === 'matched' ? 'bill (declared)' : 'bill') },
     ]);
   }
   console.log('');
@@ -5253,7 +5257,8 @@ async function handleFinances(subcommand, args, flags) {
     case 'due-soon':
     case 'recurring':
     case 'due-day':
-    case 'daily': {
+    case 'daily':
+    case 'costs': {
       const { client } = financesClient();
       const { runFinancesCommand } = await import('../src/finances-commands.js');
       const code = await runFinancesCommand(subcommand, args, flags, {
@@ -5267,7 +5272,7 @@ async function handleFinances(subcommand, args, flags) {
 
     default:
       print.error(`Unknown finances command: ${subcommand}`);
-      console.log('Usage: coinpay finances [tui|summary|accounts|ledger|connections|sync|connect|disconnect|backfill|jobs|coverage|report|reports|statements|books|pnl|payloads|digest|due|recurring|due-day|daily]');
+      console.log('Usage: coinpay finances [tui|summary|accounts|ledger|connections|sync|connect|disconnect|backfill|jobs|coverage|report|reports|statements|books|pnl|payloads|digest|due|recurring|due-day|daily|costs]');
       process.exit(1);
   }
 }

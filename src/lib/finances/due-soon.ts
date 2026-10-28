@@ -154,6 +154,8 @@ export function buildDueSoon({
   const missed: DueSoon['missed'] = [];
 
   for (const c of charges) {
+    // A declared cost with no stated billing date has nothing to project.
+    if (!c.nextExpected) continue;
     const dueOn = localDate(new Date(c.nextExpected), timezone);
     const daysUntil = daysBetween(today, dueOn);
     if (daysUntil > horizonDays) continue;

@@ -466,6 +466,27 @@ export async function getDueSoon(client, { days, timezone } = {}) {
   return data.dueSoon;
 }
 
+/**
+ * Declared recurring costs (servers paid by PayPal or crypto, which no bank
+ * feed shows). `source` defaults to every source.
+ */
+export async function listDeclaredCosts(client, { source } = {}) {
+  const qs = source ? `?source=${encodeURIComponent(source)}` : '';
+  return call(client, `/finances/declared-costs${qs}`);
+}
+
+/**
+ * Replace one source's declared costs. `body` is an OpenDevice inventory (an
+ * object with `devices`), an array of `toCoinPayCosts` rows from
+ * @profullstack/fleet, or `{ costs: [...] }`. An empty array clears it.
+ */
+export async function importDeclaredCosts(client, body, { source = 'opendevice' } = {}) {
+  return call(client, `/finances/declared-costs?source=${encodeURIComponent(source)}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function getDailySummary(client) {
   const data = await call(client, '/finances/email-schedules?kind=daily_summary');
   return data.schedule;

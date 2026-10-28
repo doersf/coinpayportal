@@ -56,6 +56,30 @@ export const TOOLS = [
     handler: async (_args, { client }) => text((await reports.getDueSoon(client, { days: 0 })).recurring),
   },
   {
+    name: 'finance_declared_costs',
+    description: 'Declared recurring costs: bills no bank feed shows (servers paid by PayPal or crypto), stated by the owner, e.g. from an OpenDevice inventory. They are merged into finance_recurring (origin "declared", or "matched" when a feed charge is the same bill).',
+    inputSchema: { type: 'object', properties: { source: { type: 'string', description: 'Only this source, e.g. opendevice' } }, additionalProperties: false },
+    handler: async (args, { client }) => text(await reports.listDeclaredCosts(client, { source: args.source })),
+  },
+  {
+    name: 'finance_import_costs',
+    description: 'Replace one source\'s declared recurring costs. Pass an OpenDevice inventory (an object with "devices"; the server converts it) or an array of @profullstack/fleet toCoinPayCosts rows. An empty array clears the source.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', description: 'Source name (default opendevice)' },
+        inventory: { type: 'object', description: 'An OpenDevice inventory' },
+        costs: { type: 'array', items: { type: 'object' }, description: 'toCoinPayCosts rows' },
+      },
+      additionalProperties: false,
+    },
+    handler: async (args, { client }) => {
+      const body = args.inventory ?? args.costs;
+      if (body === undefined) throw new Error('Pass inventory or costs');
+      return text(await reports.importDeclaredCosts(client, body, { source: args.source || 'opendevice' }));
+    },
+  },
+  {
     name: 'finance_summary',
     description: 'Balance sheet (assets, debt, net by currency), cashflow for the window, top spending categories, and the debt-and-income position.',
     inputSchema: { type: 'object', properties: { days: { type: 'integer', minimum: 1, maximum: 3650, description: 'Cashflow window (default 30)' } }, additionalProperties: false },
@@ -427,7 +451,7 @@ export async function handleMessage(message, ctx) {
         capabilities: { tools: {} },
         serverInfo: { name: 'coinpay', version: ctx.version || '0.0.0' },
         instructions:
-          'CoinPay finances. finance_due_soon answers "what is due" across every account; finance_recurring lists subscriptions and bills; finance_summary is the balance sheet. Statement PDFs come from the banks themselves (SimpleFIN has none): statements_coverage shows what is missing, statements_fetch downloads what is new on this machine. A bank marked login_needed needs a person to run `coinpay finances statements login <bank>`. Tax notices, letters and transcripts (California FTB, IRS) are in tax_documents_list; tax data stays on CoinPay surfaces and is never sent elsewhere.',
+          'CoinPay finances. finance_due_soon answers "what is due" across every account; finance_recurring lists subscriptions and bills (declared costs such as servers paid by PayPal included, see finance_declared_costs); finance_summary is the balance sheet. Statement PDFs come from the banks themselves (SimpleFIN has none): statements_coverage shows what is missing, statements_fetch downloads what is new on this machine. A bank marked login_needed needs a person to run `coinpay finances statements login <bank>`. Tax notices, letters and transcripts (California FTB, IRS) are in tax_documents_list; tax data stays on CoinPay surfaces and is never sent elsewhere.',
       });
     case 'notifications/initialized':
     case 'notifications/cancelled':

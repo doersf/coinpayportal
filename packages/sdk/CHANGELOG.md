@@ -5,6 +5,20 @@ All notable changes to `@profullstack/coinpay` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-10-28
+
+### Added
+- Declared recurring costs: bills no bank or card feed shows (servers paid by PayPal, crypto or an
+  unlinked card). `coinpay finances costs import <file|url> [--source opendevice] [--header "K: V"]`
+  takes an OpenDevice inventory (converted server-side with `@profullstack/fleet`) or `toCoinPayCosts`
+  rows and replaces that source's set; `coinpay finances costs list [--json]`, `costs clear --source s --yes`.
+  SDK `listDeclaredCosts(client, { source })`, `importDeclaredCosts(client, body, { source })`; MCP
+  `finance_declared_costs`, `finance_import_costs`.
+- `coinpay finances recurring` (and `--json`) now includes declared costs: each charge has `origin`
+  `observed`, `declared` (not in any feed) or `matched` (seen in the feed and declared: payee, amount
+  within 10% and interval agree; counted once, as observed, with the declaration in `declared`).
+  `monthlyTotal` includes declared costs; `monthlyDeclared` is that part.
+
 ## [0.25.0] - 2026-10-21
 
 ### Added

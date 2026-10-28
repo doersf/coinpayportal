@@ -386,6 +386,37 @@ async function runStatementFetchAction(action, rest, flags, { client, out, emit,
  * Run one subcommand. `ctx` supplies the client and the output channels.
  * @returns {Promise<number>} an exit code
  */
+/**
+ * Read a declared-costs body: a local JSON file or an http(s) URL (an
+ * OpenDevice inventory, or toCoinPayCosts rows). `--header "K: V"` is sent
+ * with a URL, e.g. for a private raw file; it may be repeated.
+ */
+export async function readCostsInput(where, header, { fetchImpl = globalThis.fetch } = {}) {
+  let raw;
+  if (/^https?:\/\//i.test(where)) {
+    const headers = {};
+    for (const h of [].concat(header ?? []).filter((v) => typeof v === 'string')) {
+      const i = h.indexOf(':');
+      if (i <= 0) throw new CliExit(EXIT.INVALID, `--header must look like "Name: value", got ${h.slice(0, 40)}`);
+      headers[h.slice(0, i).trim()] = h.slice(i + 1).trim();
+    }
+    const res = await fetchImpl(where, { headers });
+    if (!res.ok) throw new CliExit(EXIT.FAILURE, `${where}: HTTP ${res.status}`);
+    raw = await res.text();
+  } else {
+    try {
+      raw = readFileSync(resolvePath(where), 'utf8');
+    } catch (e) {
+      throw new CliExit(EXIT.INVALID, `Cannot read ${where}: ${e.message}`);
+    }
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new CliExit(EXIT.INVALID, `${where} is not JSON`);
+  }
+}
+
 export async function runFinancesCommand(subcommand, args, flags, ctx) {
   const { client, out, err: errOut } = ctx;
   const json = flags.json === true;
@@ -881,10 +912,12 @@ export async function runFinancesCommand(subcommand, args, flags, ctx) {
         const money = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(n);
         if (subcommand === 'recurring') {
           if (json) { out(JSON.stringify(d.recurring, null, 2)); return EXIT.OK; }
-          const rows = [...d.recurring.charges].sort((a, b) => a.nextExpected.localeCompare(b.nextExpected));
+          const rows = [...d.recurring.charges].sort((a, b) => (a.nextExpected || '9999').localeCompare(b.nextExpected || '9999'));
           out(`${rows.length} recurring charges · ${money(d.recurring.monthlyTotal)}/mo${d.recurring.monthlyDebtService ? ` (${money(d.recurring.monthlyDebtService)} debt service)` : ''}`);
+          if (d.recurring.monthlyDeclared) out(`  of which ${money(d.recurring.monthlyDeclared)}/mo is declared (not in any feed)`);
           for (const c of rows) {
-            out(`  next ${c.nextExpected.slice(0, 10)}  ${c.cadence.padEnd(9)} ${money(c.amount).padStart(11)}  ${c.payee}  · ${c.accountName}${c.isDebtService ? ' · debt' : ''}`);
+            const origin = c.origin === 'declared' ? ' · declared' : c.origin === 'matched' ? ' · matched' : '';
+            out(`  next ${(c.nextExpected || '?').slice(0, 10).padEnd(10)}  ${c.cadence.padEnd(9)} ${money(c.amount).padStart(11)}  ${c.payee}  · ${c.accountName}${c.isDebtService ? ' · debt' : ''}${origin}`);
           }
           return EXIT.OK;
         }
@@ -898,6 +931,38 @@ export async function runFinancesCommand(subcommand, args, flags, ctx) {
         }
         if (d.missed.length) out(`  Not seen lately: ${d.missed.slice(0, 8).map((m) => `${m.payee} (expected ${m.expectedOn})`).join(', ')}`);
         return EXIT.OK;
+      }
+
+      case 'costs': {
+        const action = args[0] || 'list';
+        const source = typeof flags.source === 'string' ? flags.source : undefined;
+        const fmt = (cur, n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(n);
+        const describe = (data) => {
+          const lines = data.costs.map((c) => `  ${c.source.padEnd(11)} ${c.key.padEnd(22)} ${fmt(c.currency, c.amount).padStart(11)} ${c.cadence.padEnd(8)} ${c.payee}${c.paidWith ? ` · ${c.paidWith}` : ''}${c.nextExpected ? ` · next ${c.nextExpected.slice(0, 10)}` : ''}`);
+          const totals = Object.entries(data.monthly || {}).map(([cur, n]) => `${fmt(cur, n)}/mo`).join(' + ') || 'nothing';
+          return [`${data.costs.length} declared cost(s) · ${totals}`, ...lines].join('\n');
+        };
+        if (action === 'list') {
+          const data = await api.listDeclaredCosts(client, { source });
+          emit(data, describe(data));
+          return EXIT.OK;
+        }
+        if (action === 'import') {
+          const where = args[1];
+          if (!where) throw new CliExit(EXIT.INVALID, 'Usage: coinpay finances costs import <file|url> [--source opendevice] [--header "Authorization: token …"]');
+          const body = await readCostsInput(where, flags.header);
+          const data = await api.importDeclaredCosts(client, body, { source: source || 'opendevice' });
+          emit(data, `Imported ${data.upserted} into ${data.source}${data.removed ? `, removed ${data.removed}` : ''}.\n${describe(data)}\nSee it in: coinpay finances recurring`);
+          return EXIT.OK;
+        }
+        if (action === 'clear') {
+          if (!source) throw new CliExit(EXIT.INVALID, 'Usage: coinpay finances costs clear --source <name> --yes');
+          if (!flags.yes) throw new CliExit(EXIT.INVALID, `This removes every declared cost from ${source}. Re-run with --yes to confirm.`);
+          const data = await api.importDeclaredCosts(client, [], { source });
+          emit(data, `Removed ${data.removed} declared cost(s) from ${source}.`);
+          return EXIT.OK;
+        }
+        throw new CliExit(EXIT.INVALID, 'Usage: coinpay finances costs [list [--source s]|import <file|url> [--source opendevice] [--header "K: V"]|clear --source s --yes]');
       }
 
       case 'due-day': {
@@ -991,4 +1056,4 @@ export async function runFinancesCommand(subcommand, args, flags, ctx) {
   }
 }
 
-export const EXTENDED_SUBCOMMANDS = ['connect', 'disconnect', 'consent', 'backfill', 'jobs', 'coverage', 'report', 'reports', 'statements', 'books', 'pnl', 'profit-loss', 'payloads', 'digest', 'due', 'due-soon', 'recurring', 'due-day', 'daily'];
+export const EXTENDED_SUBCOMMANDS = ['connect', 'disconnect', 'consent', 'backfill', 'jobs', 'coverage', 'report', 'reports', 'statements', 'books', 'pnl', 'profit-loss', 'payloads', 'digest', 'due', 'due-soon', 'recurring', 'due-day', 'daily', 'costs'];

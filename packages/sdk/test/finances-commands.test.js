@@ -233,3 +233,69 @@ describe('finances daily --target', () => {
     expect(out.join('\n')).toMatch(/target \$100\/day/);
   });
 });
+
+describe('finances costs (declared recurring costs)', () => {
+  const COSTS = {
+    costs: [{ source: 'opendevice', key: 'device:dev2', payee: 'DEDIROCK', amount: 149, currency: 'USD', cadence: 'monthly', monthlyEquivalent: 149, scope: 'business', category: 'hosting', paidWith: 'paypal', nextExpected: null, meta: {} }],
+    monthly: { USD: 149 },
+  };
+
+  it('imports an inventory file with PUT and the source', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cp-costs-'));
+    const file = join(dir, 'opendevice.json');
+    writeFileSync(file, JSON.stringify({ opendevice: '0.1', devices: [{ id: 'dev2' }] }));
+    const client = fakeClient({ 'PUT /finances/declared-costs': () => ({ source: 'opendevice', removed: 0, upserted: 1, ...COSTS }) });
+    const { ctx, out } = ctxFor(client);
+    const code = await runFinancesCommand('costs', ['import', file], {}, ctx);
+    expect(code).toBe(EXIT.OK);
+    expect(client.calls[0].path).toBe('/finances/declared-costs?source=opendevice');
+    expect(client.calls[0].options.method).toBe('PUT');
+    expect(JSON.parse(client.calls[0].options.body).devices[0].id).toBe('dev2');
+    expect(out.join('\n')).toMatch(/Imported 1 into opendevice/);
+    expect(out.join('\n')).toMatch(/\$149\.00\/mo/);
+  });
+
+  it('sends --header with a URL', async () => {
+    const { readCostsInput } = await import('../src/finances-commands.js');
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, text: async () => '[]' }));
+    expect(await readCostsInput('https://example.test/inv.json', ['Authorization: token abc'], { fetchImpl })).toEqual([]);
+    expect(fetchImpl.mock.calls[0][1].headers).toEqual({ Authorization: 'token abc' });
+  });
+
+  it('lists as JSON', async () => {
+    const client = fakeClient({ 'GET /finances/declared-costs': () => COSTS });
+    const { ctx, out } = ctxFor(client);
+    expect(await runFinancesCommand('costs', ['list'], { json: true }, ctx)).toBe(EXIT.OK);
+    expect(JSON.parse(out.join('\n')).monthly.USD).toBe(149);
+  });
+
+  it('refuses clear without --yes', async () => {
+    const { ctx } = ctxFor(fakeClient({}));
+    expect(await runFinancesCommand('costs', ['clear'], { source: 'opendevice' }, ctx)).toBe(EXIT.INVALID);
+  });
+
+  it('recurring marks declared and matched rows', async () => {
+    const client = fakeClient({
+      'GET /finances/due-soon': () => ({
+        dueSoon: {
+          currency: 'USD',
+          recurring: {
+            monthlyTotal: 537,
+            monthlyDebtService: 0,
+            monthlyDeclared: 149,
+            charges: [
+              { payee: 'SERVITRO', amount: 388, cadence: 'monthly', nextExpected: '2026-11-01T00:00:00Z', accountName: 'Card', isDebtService: false, origin: 'matched' },
+              { payee: 'DEDIROCK', amount: 149, cadence: 'monthly', nextExpected: '', accountName: 'Declared (opendevice, paypal)', isDebtService: false, origin: 'declared' },
+            ],
+          },
+        },
+      }),
+    });
+    const { ctx, out } = ctxFor(client);
+    expect(await runFinancesCommand('recurring', [], {}, ctx)).toBe(EXIT.OK);
+    const text = out.join('\n');
+    expect(text).toMatch(/\$149\.00\/mo is declared/);
+    expect(text).toMatch(/SERVITRO .* · matched/);
+    expect(text).toMatch(/next \?\s+monthly .* DEDIROCK .* · declared/);
+  });
+});

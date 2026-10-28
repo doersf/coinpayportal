@@ -71,7 +71,7 @@ export async function loadDueSoon(
   // The newest row each charged account has posted, so a projection the bank
   // simply has not reported yet is not called overdue.
   const lastPosted: Record<string, string> = {};
-  const chargedIds = [...new Set(position.recurring.charges.map((c) => c.accountId))];
+  const chargedIds = [...new Set(position.recurring.charges.map((c) => c.accountId).filter(Boolean))];
   if (chargedIds.length > 0) {
     const supabase = getSupabaseAdmin();
     await Promise.all(

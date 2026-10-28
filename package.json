@@ -49,6 +49,7 @@
     "@profullstack/autoblog": "^0.4.0",
     "@profullstack/coinpay": "workspace:*",
     "@profullstack/emailer": "^1.0.3",
+    "@profullstack/fleet": "0.1.1",
     "@profullstack/footer": "latest",
     "@profullstack/footprint": "workspace:*",
     "@profullstack/profile": "0.1.6",
