@@ -55,7 +55,8 @@ const MERCHANT = '0f4b2f2a-8d55-4a8e-9a43-1d6f0b6e2a11';
 const PAYMENT = 'd084f959-c33c-4540-82b8-221181347639';
 const ESCROW = '5c0f3b8e-7a51-4d0a-9e57-0d3a3b6b9f20';
 const URL_ = 'https://merchant.example.com/webhooks/coinpay';
-const PLAIN_SECRET = 'whsecret_d0rzTestSecretValueForContractAssertion';
+// Generated per run: the same shape business settings issue (whsecret_ + 64 hex).
+const PLAIN_SECRET = ['whsecret', randomBytes(32).toString('hex')].join('_');
 
 // --- the receivers ----------------------------------------------------------
 
@@ -237,10 +238,11 @@ describe('payment webhooks through the hub', () => {
     (globalThis as any).__coinpayWebhooksHub = hub;
     nextStatus = [500, 200];
     await sendPaymentWebhook(sb as any, BUSINESS, PAYMENT, 'payment.confirmed', paymentData);
-    sb.rows('businesses')[0].webhook_secret = 'whsecret_rotated';
+    const rotated = ['whsecret', randomBytes(32).toString('hex')].join('_');
+    sb.rows('businesses')[0].webhook_secret = rotated;
     now += 1_500;
     await hub.hooks.drain();
-    expect(sdkVerify({ payload: captured[1].body, signature: captured[1].headers.get('x-coinpay-signature')!, secret: 'whsecret_rotated' })).toBe(true);
+    expect(sdkVerify({ payload: captured[1].body, signature: captured[1].headers.get('x-coinpay-signature')!, secret: rotated })).toBe(true);
   });
 
   it('falls back to the old direct sender, once, when the hub cannot take the delivery', async () => {

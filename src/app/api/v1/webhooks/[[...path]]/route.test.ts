@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import { randomBytes } from 'crypto';
 import { fakeSupabase } from '@/lib/webhooks/__fixtures__/fake-supabase';
 
 const BUSINESS = 'b198c6dc-4c3b-4a54-994c-a750c1a580cd';
@@ -25,9 +26,9 @@ const req = (path: string, init: { method?: string; key?: string; body?: unknown
   });
 
 beforeEach(() => {
-  process.env.ENCRYPTION_KEY = 'a1'.repeat(16) + 'b2c3d4e5'.repeat(4);
+  process.env.ENCRYPTION_KEY = randomBytes(32).toString('hex');
   const sb = fakeSupabase();
-  sb.rows('businesses').push({ id: BUSINESS, webhook_url: 'https://m.example.com/h', webhook_secret: 'whsecret_x', merchant_id: 'm' });
+  sb.rows('businesses').push({ id: BUSINESS, webhook_url: 'https://m.example.com/h', webhook_secret: `whsecret_${randomBytes(8).toString('hex')}`, merchant_id: 'm' });
   (globalThis as any).__coinpayWebhooksHub = createCoinpayHub({ client: sb as any, fetchImpl: (async () => new Response(null, { status: 204 })) as any });
 });
 
